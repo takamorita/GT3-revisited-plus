@@ -22,7 +22,7 @@ float DynamicScale::frame(double frame_ms, double present_ms) {
     if (frame_ms <= 0) return scale_;
     if (frame_ms > 250) { // a load or a pause: the next ~5 s settle (first draws, pipelines warming)
         window_ms_ = present_ms_ = late_ms_ = 0, frames_ = missed_ = 0;
-        settle_ = 5;
+        settle_ = 5, settle_from_ = scale_;
         quick_ = true, probed_ = false;
         return scale_;
     }
@@ -55,14 +55,18 @@ float DynamicScale::frame(double frame_ms, double present_ms) {
     }
     if (avg > target_ms_ * 1.1 || missed >= 3) {
         good_windows_ = 0;
-        if (settling) return scale_; // slow seconds after a load are not judged
+        // Slow seconds after a load are not judged, except to take back what the quick steps up
+        // climbed in them.
+        const bool climbed = quick_ && scale_ > settle_from_ + 1e-4f;
+        if (settling && !climbed) return scale_;
         // CPU-bound frames: a smaller picture would not help.
         if (!gpu_bound) return scale_;
         // Fill time goes with the pixel count, the scale squared.
         float to = std::floor(scale_ * float(std::sqrt(target_ms_ / avg)) / kStep + 1e-3f) * kStep;
+        if (settling) to = std::max(to, settle_from_);
         const float before = scale_;
         scale_ = std::clamp(std::min(to, scale_ - kStep), kMin, max_);
-        if (scale_ != before) settle_ = 1, quick_ = false; // the next second shows the new size
+        if (scale_ != before) settle_ = std::max(settle_, 1), quick_ = false; // the next second shows the new size
         return scale_;
     }
     if (missed > 0) { // the odd miss: hold

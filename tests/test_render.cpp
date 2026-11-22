@@ -198,6 +198,23 @@ TEST(render_dynamic_scale_climbs_quickly_after_a_load) {
     CHECK(changes <= 8);
 }
 
+TEST(render_dynamic_scale_takes_back_a_climb_after_a_load) {
+    // A race start: the first seconds after the load are light and the quick steps up climb, then
+    // the countdown's view is heavy while the 5 s after the load still run (Smokey Mountain on a
+    // slow device: 90% -> 100%, then 19 ms of GPU at 100%). The climb is taken back at once, down to
+    // where it was at the load, not after the 5 s.
+    render::DynamicScale d;
+    d.reset(1.0f, 60, 0.9f);
+    d.frame(400, 390);
+    run_frames(d, 60, 8.0, 2.0, 3.2);
+    CHECK(near(d.scale(), 1.0f));
+    run_frames(d, 60, 19.0, 2.0, 1.5);
+    CHECK(d.scale() <= 0.9f + 1e-3f && d.scale() >= 0.9f - 1e-3f);
+    // Then, the 5 s over, as usual (heavier: 19 ms keeps up at 90%).
+    run_frames(d, 60, 30.0, 2.0, 6.0);
+    CHECK(d.scale() < 0.9f);
+}
+
 TEST(render_dynamic_scale_starts_below_its_ceiling) {
     // Auto on a phone: starts at the fixed Auto size and climbs to full resolution when the GPU
     // keeps up...
