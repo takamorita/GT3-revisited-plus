@@ -136,6 +136,8 @@ public:
     // True while switching controls: the screen keeps the frozen frame and
     // draws the transition instead of the menu.
     bool switching() const { return switch_frames_ > 0; }
+    // A game request made and waiting for the transition to end (take_request() then hands it on).
+    const std::optional<GameRequest>& pending_request() const { return pending_request_; }
     // Gameplay started by a request has returned: reopen the menu.
     void game_finished();
     bool waiting_for_game() const { return waiting_game_; }

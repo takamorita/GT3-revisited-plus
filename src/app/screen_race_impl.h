@@ -6,6 +6,7 @@
 // are in screen_race.h and screen_online.h.
 
 #include "app/app.h"
+#include "app/race_prep.h"
 #include "app/camera_editor.h"
 #include "app/screen_gtmode.h"
 #include "app/screen_touch_overlay.h"
@@ -293,13 +294,28 @@ private:
     void take_live_condition();
     void seed_vehicle_condition(const sim::EngineCondition& c, bool live);
     sim::EngineCondition live_condition() const;
-    std::optional<Bytes> read_car(App& app, const std::string& model) const;
+    // A car model (the course's folder, else the day folder), shared with the load's other reads of it.
+    std::shared_ptr<const Bytes> read_car(App& app, const std::string& model) const;
+    // A car file (cars/<folder>/<model>, menu/cars/<model>): the load's own read of it, else the menus' (app/race_prep.h),
+    // else read now; nullptr when missing.
+    std::shared_ptr<const Bytes> read_car_file(App& app, const std::string& path) const;
+    // The car files read during a load (start), by path: the load reads one up to three times (the player's car, the
+    // spark points, the opponents' models). Let go when it ends.
+    mutable std::map<std::string, std::shared_ptr<const Bytes>> car_files_;
+    bool keep_car_files_ = false;
+    // What the menus prepared for the race start() loads (app/race_prep.h): dropped when the load ends, gone with the next
+    // start (or the screen).
+    std::shared_ptr<RacePrep> prep_;
+    // The last start's course track, for the next start on the same course (restarts, retries).
+    std::shared_ptr<const track::Track> course_track_;
+    std::string course_track_label_;
     // [video] showroom_wheels: the model's menu/cars file and a fitted wheel's
     // menu/wheel/<label> (CarVisual's showroom_car, showroom_wheel); none when off. `stand_in`: the
     // menus' rim, read only for a race rim with nothing to draw, whatever the setting
     // (CarModelOptions::stand_in_rim).
     struct ShowroomFiles {
-        std::optional<Bytes> car, wheel;
+        std::shared_ptr<const Bytes> car;
+        std::optional<Bytes> wheel;
         std::function<std::optional<Bytes>()> stand_in;
         ByteSpan car_span() const { return car ? ByteSpan(*car) : ByteSpan{}; }
         ByteSpan wheel_span() const { return wheel ? ByteSpan(*wheel) : ByteSpan{}; }
@@ -1032,6 +1048,12 @@ private:
     std::unique_ptr<RaceField> field_;
     std::unique_ptr<RaceField> solo_field_; // a solo run on the exact core (exact_solo)
     std::vector<std::shared_ptr<CarVisual>> opp_visuals_;
+    // The opponents' models from the last load_opponent_cars, by (model, paint), for the next one on the same course with
+    // the same detail: start() builds the field and restart() builds it again, and a retry builds it once more. The
+    // models are the same each time (their shadow is set once, from the course), and building them again was about
+    // half of a race's start.
+    std::map<std::pair<std::string, int>, std::shared_ptr<CarVisual>> opp_visual_cache_;
+    std::string opp_visual_cache_key_;
     bool race_mode_ = false;
     // --- online battle (docs/dev/ONLINE.md) ---
     bool online_ = false;
@@ -1067,6 +1089,8 @@ private:
     // 2P battle (split screen): player 2 drives the field's second car with pad 2.
     bool two_player_ = false;
     OpponentEngines opp_engines_;
+    // The engine banks the race's cars play (engine_, engine2_, extra_, extra2_, opp_engines_), read once for them all.
+    EngineBanks engine_banks_;
     RaceSfx sfx_;
     CarSfx car_sfx_, car_sfx2_;
     std::vector<CarSfx> opp_sfx_; // every other car's tyre loops (sound §7.6)

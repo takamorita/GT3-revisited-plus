@@ -37,12 +37,16 @@
 #include "audio/voice_mixer.h"
 #include "formats/sound/engn.h"
 
+#include <map>
 #include <memory>
 #include <string>
 
 namespace gt3r {
 
 class Vfs;
+
+// Engine bank files read and parsed, by path: shared by the cars that load them (a race's: RaceScreen).
+using EngineBanks = std::map<std::string, std::shared_ptr<const sound::EngineBank>>;
 
 class EngineSound {
 public:
@@ -63,10 +67,15 @@ public:
     EngineSound() = default;
     ~EngineSound();
 
-    // Loads sound/engine/<id> and sound/<variant>/<id>. Variant 0..7. `dir`: a host folder holding the
-    // banks in the same layout (engine/<id>, normal0/<id>...; an exported mod car's own, ModCar::sound_dir)
-    // to read them from instead.
-    bool load(Vfs& vfs, int sound_id, int variant, std::string* error = nullptr, const std::string& dir = {});
+    // Loads sound/engine/<id> and sound/<variant>/<id>. Variant 0..7. With `banks`, the banks are taken from it, or read
+    // and kept there. `dir`: a host folder holding the banks in the same layout (engine/<id>, normal0/<id>...; an
+    // exported mod car's own, ModCar::sound_dir) to read them from instead (not through `banks`).
+    bool load(Vfs& vfs, int sound_id, int variant, std::string* error = nullptr, EngineBanks* banks = nullptr,
+              const std::string& dir = {});
+    // Reads a car's banks (or a bank file) into `banks` for a load to take (the menus, ahead of a race: app/race_prep.h).
+    // A missing or bad file is left out (the load that wants it reports it).
+    static void read_banks(const Vfs& vfs, int sound_id, int variant, EngineBanks& banks);
+    static void read_bank(const Vfs& vfs, const std::string& path, EngineBanks& banks);
     void set_banks(std::shared_ptr<const sound::EngineBank> engine, std::shared_ptr<const sound::EngineBank> exhaust);
     bool loaded() const { return engine_ || exhaust_; }
     const sound::EngineBank* engine_bank() const { return engine_.get(); }
@@ -134,7 +143,7 @@ private:
 // crossfade follow the same rules as EngineSound.
 class EngineUnit {
 public:
-    bool load(Vfs& vfs, const std::string& path, std::string* error = nullptr);
+    bool load(Vfs& vfs, const std::string& path, std::string* error = nullptr, EngineBanks* banks = nullptr);
     void set_bank(std::shared_ptr<const sound::EngineBank> bank);
     bool loaded() const { return player_.bank != nullptr; }
     const sound::EngineBank* bank() const { return player_.bank.get(); }

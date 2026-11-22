@@ -107,13 +107,21 @@ void Volume::read_range(const Entry& e, u64 offset, void* out, size_t len) const
     file_.read_at(parts_[e.part].base + u64(e.sector) * kSectorSize + offset, out, len);
 }
 
-std::optional<Bytes> Volume::read_program() const {
-    if (!program_reader_) return std::nullopt;
-    try {
-        return program_reader_();
-    } catch (const std::exception&) {
-        return std::nullopt;
+std::shared_ptr<const Bytes> Volume::program() const {
+    std::lock_guard lock(program_mutex_);
+    if (!program_ && program_reader_) {
+        try {
+            program_ = std::make_shared<const Bytes>(program_reader_());
+        } catch (const std::exception&) {
+            // (a read that failed once, e.g. while the disc was busy, is tried again next time)
+        }
     }
+    return program_;
+}
+
+std::optional<Bytes> Volume::read_program() const {
+    if (std::shared_ptr<const Bytes> p = program()) return *p;
+    return std::nullopt;
 }
 
 } // namespace gt3r
