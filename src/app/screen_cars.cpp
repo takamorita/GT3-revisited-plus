@@ -10,6 +10,7 @@
 #include "formats/text/charset.h"
 #include "game/data/car_database.h"
 
+#include <cstdlib>
 #include <memory>
 #include <optional>
 #include <string>

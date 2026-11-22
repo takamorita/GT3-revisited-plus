@@ -8,6 +8,7 @@
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <stdexcept>

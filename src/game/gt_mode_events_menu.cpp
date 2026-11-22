@@ -21,6 +21,7 @@
 #include "base/log.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <map>
 #include <set>
 

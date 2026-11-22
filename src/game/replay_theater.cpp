@@ -11,6 +11,7 @@
 #include "vfs/vfs.h"
 
 #include <cmath>
+#include <cstdlib>
 #include <ctime>
 
 namespace gt3r::game {

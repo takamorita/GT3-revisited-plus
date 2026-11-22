@@ -10,6 +10,7 @@
 #include "formats/model/wheel_spec.h"
 #include "game/data/car_database.h"
 
+#include <algorithm>
 #include <cmath>
 #include <functional>
 

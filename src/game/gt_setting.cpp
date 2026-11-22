@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <climits>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace gt3r::game {
