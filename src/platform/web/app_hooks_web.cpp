@@ -158,6 +158,15 @@ bool show_document_picker(SDL_Window* window, const SDL_DialogFileFilter* filter
     return false;
 }
 
+// The page's download of an export (Module.gt3rDownloadLater), after this iteration.
+EM_JS(void, gt3r_web_download_later, (const char* path, const char* name), {
+    if (Module.gt3rDownloadLater) Module.gt3rDownloadLater(UTF8ToString(path), UTF8ToString(name));
+});
+
+void download_after_write(const std::string& path, const std::string& name) {
+    gt3r_web_download_later(path.c_str(), name.c_str());
+}
+
 } // namespace gt3r::platform
 
 #endif
