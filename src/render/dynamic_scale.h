@@ -14,7 +14,10 @@
 // then three minutes after more misses). Except at the start and after a load, until a step up
 // misses or the scale steps down: then every clean second steps up, the 5 s after the load
 // included, so a phone with room to spare reaches full resolution about 5 s into a race (a
-// Pixel 10 took 25 s). A late frame counts as a miss only if the next one does not make up for
+// Pixel 10 took 25 s). What it climbed in those 5 s it also takes back in them when the frames
+// turn slow (a race's countdown view after light first seconds: Smokey Mountain on a slow device
+// went 90% -> 100% and then ran at 38 fps until the 5 s were over), down to where it was at the
+// load; below that, slow seconds after a load are still not judged. A late frame counts as a miss only if the next one does not make up for
 // it: with the frame rate capped below the display's (Pixels hold games to 60 fps on their
 // 120 Hz screens), frame times wobble around the target, 22 ms then 11 ms, while the average
 // stays on it; a frame really shown a refresh late is not followed by a short one.
@@ -48,6 +51,7 @@ private:
     bool probed_ = false;                    // the last change was a step up
     bool quick_ = true;                      // since the start or a load: no failed step up or step down
     int settle_ = 0;                         // windows not judged after a load or pause
+    float settle_from_ = 0;                  // the scale at that load (what quick steps up climbed from)
 };
 
 } // namespace gt3r::render
