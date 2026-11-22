@@ -89,7 +89,17 @@ EMSCRIPTEN_KEEPALIVE int gt3r_web_debug_set(const char* key, const char* value) 
 
 namespace gt3r::platform {
 
-void on_start() {}
+// The browser's requestAnimationFrame is the vsync, and SDL's main loop runs on it. With SDL_HINT_MAIN_CALLBACK_RATE
+// set ("0": no rate of its own, also in App::apply_frame_limit) SDL_SetRenderVSync no longer moves that loop (off moved
+// it to setTimeout, an unsteady 40-60 fps; the browser has no tearing to avoid, so off only skips SDL's own wait).
+// The loop's timing is set to requestAnimationFrame before the loop exists (Emscripten keeps it, though the call fails
+// without a loop): SDL's Emscripten GL reads the swap interval from it, so App::init's and GpuContext::init's vsync
+// requests succeed. Otherwise SDL_SetRenderVSync fell back to a simulated vsync, which no later successful request
+// turns off (SDL 3.4): a busy wait of 0 to 16 ms on every SDL_RenderPresent, off phase with the browser's frames.
+void on_start() {
+    SDL_SetHint(SDL_HINT_MAIN_CALLBACK_RATE, "0");
+    emscripten_set_main_loop_timing(EM_TIMING_RAF, 1);
+}
 
 void on_app_created(App& app) { g_web_app = &app; }
 

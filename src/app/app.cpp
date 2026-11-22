@@ -489,8 +489,8 @@ void App::apply_frame_limit() {
     const double rate = interval > 1 ? hz / interval : 0; // 0: as fast as vsync allows
     if (rate == frame_limit_rate_) return;
     frame_limit_rate_ = rate;
-    if (rate > 0) SDL_SetHint(SDL_HINT_MAIN_CALLBACK_RATE, std::to_string(rate).c_str());
-    else SDL_ResetHint(SDL_HINT_MAIN_CALLBACK_RATE);
+    // ("0", not a reset: SDL's loops take it as no hint, and in a browser the hint keeps SDL_SetRenderVSync off them)
+    SDL_SetHint(SDL_HINT_MAIN_CALLBACK_RATE, rate > 0 ? std::to_string(rate).c_str() : "0");
     LOG_INFO("Display %.0f Hz: drawing every %s", hz,
              interval == 1 ? "refresh" : (std::to_string(interval) + " refreshes").c_str());
 }
