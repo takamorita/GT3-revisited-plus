@@ -1,4 +1,5 @@
 #include "vfs/vfs.h"
+#include <chrono>
 
 #include "base/config.h"
 #include "base/log.h"
@@ -7,6 +8,10 @@
 #include <SDL3/SDL_filesystem.h>
 
 #include <algorithm>
+#include <thread>
+#include <mutex>
+#include <map>
+#include <atomic>
 #include <cstring>
 #include <memory>
 #include <set>
@@ -144,7 +149,77 @@ bool Vfs::exists(const std::string& path) const {
     return overrides_.count(p) || (base_ && base_->find(p));
 }
 
+struct Vfs::Prefetch {
+    std::mutex mutex;
+    std::map<std::string, std::shared_ptr<const Bytes>> done; // normalized path -> contents
+    std::atomic<bool> stop{false};
+    std::thread thread;
+    ~Prefetch() {
+        stop = true;
+        if (thread.joinable()) thread.join();
+    }
+};
+
+void Vfs::prefetch(std::vector<std::string> paths) {
+    std::shared_ptr<Prefetch> old;
+    {
+        std::lock_guard lock(pf_mu_);
+        old = std::move(prefetch_);
+    }
+    if (old && old->thread.joinable()) { // (outside pf_mu_: read() goes on meanwhile, without the old files)
+        old->stop = true;
+        old->thread.join();
+    }
+    auto pf = std::make_shared<Prefetch>();
+    Prefetch* raw = pf.get(); // (the thread is joined before pf goes: in the next prefetch() or ~Prefetch)
+    pf->thread = std::thread([this, raw, paths = std::move(paths)] {
+        for (const std::string& path : paths) {
+            if (raw->stop) break;
+            std::optional<Bytes> b;
+            try {
+                b = read_ahead(path, raw->stop);
+            } catch (const std::exception&) {
+            }
+            if (!b) continue;
+            auto contents = std::make_shared<const Bytes>(std::move(*b));
+            std::lock_guard lock(raw->mutex);
+            raw->done[normalize_vfs_path(path)] = std::move(contents);
+        }
+    });
+    std::lock_guard lock(pf_mu_);
+    prefetch_ = std::move(pf);
+}
+
 std::optional<Bytes> Vfs::read(const std::string& path) const {
+    std::shared_ptr<Prefetch> pf;
+    {
+        std::lock_guard lock(pf_mu_);
+        pf = prefetch_;
+    }
+    if (pf) {
+        std::lock_guard lock(pf->mutex);
+        if (auto it = pf->done.find(normalize_vfs_path(path)); it != pf->done.end()) return Bytes(*it->second);
+    }
+    return read_now(path);
+}
+
+std::optional<Bytes> Vfs::read_ahead(const std::string& path, const std::atomic<bool>& stop) const {
+    // A large uncompressed disc file in pieces with a pause between them: read whole (fread of 10 MB, a race song)
+    // the disc image's reads behind it waited, and a race on a slow device stopped for 200 ms.
+    const std::string p = normalize_vfs_path(path);
+    const Volume::Entry* e = !overrides_.count(p) && base_ ? base_->find(p) : nullptr;
+    constexpr size_t kPiece = 64 * 1024;
+    if (!e || e->compressed || e->size <= 16 * kPiece) return read_now(path);
+    Bytes out(e->size);
+    for (size_t at = 0; at < out.size(); at += kPiece) {
+        if (stop) return std::nullopt;
+        base_->read_range(*e, at, out.data() + at, std::min(kPiece, out.size() - at));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return out;
+}
+
+std::optional<Bytes> Vfs::read_now(const std::string& path) const {
     std::string p = normalize_vfs_path(path);
     if (p == kModCarsList) { // "<mod id>\t<host path>" per line, mods in ascending priority
         std::string text;
