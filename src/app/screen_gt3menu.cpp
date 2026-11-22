@@ -33,6 +33,7 @@
 #include "app/screen_registry.h"
 #include "base/log.h"
 #include "menu/flow/game_flow.h"
+#include "race/exact_setup.h"
 #include "menu/flow/gt_mode_hooks.h"
 #include "menu/flow/menu_sound.h"
 #include "menu/menu_renderer.h"
@@ -45,6 +46,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <deque>
+#include <future>
 #include <map>
 #include <optional>
 #include <utility>
@@ -358,6 +360,12 @@ private:
         // The language page shows before a language is chosen: in the region's own (British English).
         if (language_page_) lang_ = text::language_code(app.vfs()->region().default_language());
         renderer_ = std::make_unique<MenuRenderer>(app.renderer());
+        // The disc's program data, which every race is set up from (decoded once: about 120 ms in a browser), is worked
+        // out on a thread while the menus show, so the first race's load does not do it.
+        if (app.vfs() && !warm_.valid())
+            warm_ = std::async(std::launch::async, [vfs = app.vfs()] {
+                race::exact_program_data(*vfs);
+            });
         // "mpeg" widgets show the background movie.
         // GT mode: 3D car renders on top of the widget's own art.
         renderer_->set_widget_overlay_drawer([this, &app](SDL_Renderer* r, const Element& e, const SDL_FRect& box,
@@ -672,6 +680,7 @@ private:
     text::GameFonts fonts_; // before renderer_: the text drawer refers to it
     std::unique_ptr<MenuRenderer> renderer_;
     std::unique_ptr<GameFlow> flow_;
+    std::future<void> warm_; // the races' program data (waited for when the screen goes)
     MenuSounds sounds_;
     ScreenTransition transition_;
     video::MoviePlayer movie_;
