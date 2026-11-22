@@ -40,6 +40,7 @@ void RaceScreen::open_pause(App& app) {
     pause_menu_.set_retry_enabled(!retry_locked_);
     pause_menu_.open(pause_kind());
     silence(app);
+    save_music_changes(app);
 }
 
 void RaceScreen::update_pause(App& app, double dt) {

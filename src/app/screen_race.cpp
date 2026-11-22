@@ -99,6 +99,7 @@ RaceScreen::RaceScreen(const OnlineLaunch& l) : preset_(read_preset()) {
 RaceScreen::~RaceScreen() {
     if (loading_own_) SDL_DestroyTexture(loading_own_);
     if (!app_) return;
+    save_music_changes(*app_);
     app_->remember_race_scale();
     silence(*app_);
     music_.stop(app_->audio());
@@ -165,6 +166,7 @@ void RaceScreen::on_event(App& app, const SDL_Event& e) {
     else menu_pointer_.clear();
     // Mobile: going to the background pauses the race, like the console.
     if (e.type == SDL_EVENT_DID_ENTER_BACKGROUND && stage_ == Stage::Drive && !paused_) open_pause(app);
+    if (e.type == SDL_EVENT_WILL_ENTER_BACKGROUND || e.type == SDL_EVENT_TERMINATING) save_music_changes(app);
     // Ours, computers: another window in front (race::focus_loss). Only while the player drives (replays,
     // demonstrations and the menus over the race play no rumble); the pause stays on when the window is back.
     if (e.type == SDL_EVENT_WINDOW_FOCUS_GAINED) focus_quiet_ = false;
