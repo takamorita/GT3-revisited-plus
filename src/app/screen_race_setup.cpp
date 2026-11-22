@@ -55,6 +55,14 @@ void RaceScreen::start(App& app, const Replay* replay) {
     const CourseEntry& ce = courses_[size_t(course_sel_)];
     const CarEntry& ca = cars_[size_t(car_sel_)];
     Uint64 t0 = SDL_GetPerformanceCounter();
+    // The load's parts in ms, for its log line: where a slow load spends its time.
+    std::string parts;
+    auto part = [&parts, mark = t0](const char* what) mutable {
+        const Uint64 n = SDL_GetPerformanceCounter();
+        parts += (parts.empty() ? "" : ", ") + std::string(what) + " " +
+                 std::to_string(int(double(n - mark) * 1000.0 / double(SDL_GetPerformanceFrequency())));
+        mark = n;
+    };
     try {
         std::string path = course_path(*app.vfs(), ce.label);
         std::optional<Bytes> read = app.vfs()->read(path);
@@ -82,6 +90,7 @@ void RaceScreen::start(App& app, const Replay* replay) {
         std::string model = launch_model_.empty() ? ca.model : launch_model_;
         std::optional<Bytes> car_file = read_car(app, model);
         if (!car_file || car_file->empty()) throw FormatError("car model cars/day/" + model + " is missing or empty");
+        part("read");
 
         course_scene_.reset();
         car_visual_.reset();
@@ -96,6 +105,7 @@ void RaceScreen::start(App& app, const Replay* replay) {
             return h.height;
         });
         course_scene_ = std::make_unique<CourseScene>(*app.gpu(), *course, ce.label, preset_.sheen);
+        part("scenery");
         for (race::SceneryFade& f : scenery_fades_) f.reset();
         // The brake parts inside the race cars' wheels (loaded before every race).
         brake_parts_.reset();
@@ -116,6 +126,7 @@ void RaceScreen::start(App& app, const Replay* replay) {
         if (event_paint_id_ != 0xFFFFFFFFu)
             if (int k = colors_.index_of(model, event_paint_id_); k >= 0) preset_.paint = k;
         build_player_visual(app, model, *car_file);
+        part("car");
         course_name_ = ce.name;
         // The start title shows the course table's name as it is: licence sections have their
         // own ("Grand Valley Test Section"), and a course without one shows no title.
@@ -133,6 +144,7 @@ void RaceScreen::start(App& app, const Replay* replay) {
         // (The pace-car test is a licence run, a solo mode with one computer car.)
         race_mode_ = two_player_ || !race_event_.empty() || (!race_opponents_.empty() && !pace_car_) || online_;
         if (!build_vehicle(app)) throw FormatError(error_);
+        part("field");
         build_tv_cameras();
         gtrc_.reset();
         director_ = ReplayDirector(); // (not left pointing at the old script)
@@ -289,8 +301,9 @@ void RaceScreen::start(App& app, const Replay* replay) {
     else if (!replay && preset_.prerace)
         open_prerace_menu(app);
     if (preset_.demo && !replay) start_demo();
-    LOG_INFO("Race: loaded in %.0f ms",
-             double(SDL_GetPerformanceCounter() - t0) * 1000.0 / double(SDL_GetPerformanceFrequency()));
+    part("rest");
+    LOG_INFO("Race: loaded in %.0f ms (%s)",
+             double(SDL_GetPerformanceCounter() - t0) * 1000.0 / double(SDL_GetPerformanceFrequency()), parts.c_str());
     if (debug_) {
         for (int i = 0; i < 120; ++i) tick(app, PadState{});
         const sim::VehicleState& s = vehicle_->state();
