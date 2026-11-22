@@ -337,6 +337,54 @@ void GameFlow::switch_control(const std::string& set, const std::string& page, i
     next_set_ = set;
     next_page_ = page;
     next_focus_ = focus;
+    prepare(set, page);
+}
+
+// The pmbs a control opened on `page` draws from: the page's and its import page's (MenuController::build).
+static std::vector<int> opening_pmbs(const MblFile& flow, const std::string& page) {
+    std::vector<int> n{MenuSet::page_pmb(flow, page)};
+    if (int fp = flow.find_page(page); fp >= 0 && !import_page(flow.pages[size_t(fp)]).empty())
+        if (int i = MenuSet::page_pmb(flow, import_page(flow.pages[size_t(fp)])); i != n[0]) n.push_back(i);
+    return n;
+}
+
+void GameFlow::prepare(const std::string& set, const std::string& page) {
+    if (prepare_.valid()) take_prepared();
+    // The pmbs the set has already are not read again.
+    std::vector<int> have;
+    if (auto it = sets_.find(set); it != sets_.end() && it->second) {
+        const std::vector<int> want = opening_pmbs(it->second->flow(), page);
+        for (int n : want)
+            if (it->second->has_scene(n)) have.push_back(n);
+        if (have.size() == want.size()) return;
+    }
+    prepare_ = std::async(std::launch::async, [reader = reader_, lang = lang_, set, page, have] {
+        Prepared out{set, lang, {}};
+        std::vector<int> want;
+        try {
+            const std::optional<Bytes> data = reader("menu/" + set + ".mbl");
+            if (!data) return out;
+            want = opening_pmbs(MblFile::parse(*data), page);
+        } catch (const std::exception&) {
+            return out; // the switch reads it again and reports it
+        }
+        for (int n : want)
+            if (std::find(have.begin(), have.end(), n) == have.end())
+                out.scenes.emplace_back(n, MenuSet::load_scene(reader, MenuSet::pmb_path(lang, set, n)));
+        return out;
+    });
+}
+
+void GameFlow::take_prepared() {
+    if (!prepare_.valid()) return;
+    Prepared p = prepare_.get();
+    if (p.lang != lang_ || p.scenes.empty()) return;
+    try {
+        const MenuSet& s = load_set(p.set);
+        for (auto& [n, scene] : p.scenes) s.adopt(n, std::move(scene));
+    } catch (const std::exception&) {
+        // open_control loads the set again and reports it
+    }
 }
 
 void GameFlow::request_race(GameRequest r) {
@@ -623,6 +671,7 @@ void GameFlow::tick(MenuKeys held) {
                 ctl_.reset();
                 control_.clear();
             } else {
+                take_prepared();
                 open_control(next_set_, next_page_, next_focus_);
             }
         }
