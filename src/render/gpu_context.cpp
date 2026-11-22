@@ -795,6 +795,12 @@ PendingGpuWork& pending_gpu_work() {
 } // namespace
 
 void note_gpu_submits(SDL_GPUDevice* device, u32 submits, u64 bytes) {
+#if GT3R_GLES
+    // OpenGL ES keeps no command buffers, fences or transfer buffers in flight (every upload is a GL call that copies
+    // its data), so there is nothing to recycle, and the wait would be a glFinish: in a browser, the GPU process
+    // finishing every upload so far, many times over in a race load (each texture is a submit here).
+    if (gles::active()) return;
+#endif
     if (pending_gpu_work().add(submits, bytes)) SDL_WaitForGPUIdle(device);
 }
 
