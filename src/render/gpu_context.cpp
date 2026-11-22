@@ -176,6 +176,8 @@ bool GpuContext::init(SDL_Window* window, const GpuOptions& options) {
         return false;
     vs_copy_ = make_shader(Stage::CopyVertex);
     fs_copy_ = make_shader(Stage::CopyFragment);
+    fs_nokill_ = make_shader(Stage::NoKillFragment);
+    fs_plain_nokill_ = make_shader(Stage::PlainNoKillFragment);
 
     for (SDL_GPUTextureFormat f :
          {SDL_GPU_TEXTUREFORMAT_D32_FLOAT, SDL_GPU_TEXTUREFORMAT_D24_UNORM, SDL_GPU_TEXTUREFORMAT_D16_UNORM})
@@ -221,6 +223,8 @@ GpuContext::~GpuContext() {
         if (fs_resample_) SDL_ReleaseGPUShader(device_, fs_resample_);
         if (fs_fx_) SDL_ReleaseGPUShader(device_, fs_fx_);
         if (fs_no_color_) SDL_ReleaseGPUShader(device_, fs_no_color_);
+        if (fs_nokill_) SDL_ReleaseGPUShader(device_, fs_nokill_);
+        if (fs_plain_nokill_) SDL_ReleaseGPUShader(device_, fs_plain_nokill_);
     }
     if (renderer_) SDL_DestroyRenderer(renderer_); // releases the window claim
     if (device_) SDL_DestroyGPUDevice(device_);
@@ -234,6 +238,10 @@ SDL_GPUShader* GpuContext::make_shader(Stage stage) {
                                        GT3R_SHADER_CODE(model_frag_fx),    GT3R_SHADER_CODE(model_vert_copy),
                                        GT3R_SHADER_CODE(model_frag_copy),  GT3R_SHADER_CODE(no_color_frag)};
     if (stage == Stage::NoColorFragment) return create_shader(kCode[size_t(stage)], false, 0, 0);
+    if (stage == Stage::NoKillFragment || stage == Stage::PlainNoKillFragment) {
+        // (No backend has these variants yet: View3D then draws with the shaders that can discard.)
+        return nullptr;
+    }
     const bool vertex = stage == Stage::Vertex || stage == Stage::ClippedVertex || stage == Stage::CopyVertex;
     // Vertex: transforms, GT3 per-vertex lighting. Fragment: the texture, the environment cube,
     // the sphere map.
@@ -491,7 +499,19 @@ std::vector<PipelineKey> warm_keys() {
             k.blend = b, k.cull = CullMode::None, k.depth_write = false;
             k.single = one_sample, k.resample = true;
             keys.push_back(k);
+            k.resample = false; // (the post passes at one sample: View3D::draw)
+            if (one_sample) keys.push_back(k);
         }
+    // The same with model.frag's NO_KILL variants (PipelineKey::no_kill): the draws View3D finds nothing of discarded
+    // (warm_pipelines leaves them out where the variants do not exist). Not the clipped, the turned copies', the rare
+    // sampling's, the wet road's, the depth of field's or the depth reset's: they never draw with them.
+    const size_t n = keys.size();
+    for (size_t i = 0; i < n; ++i) {
+        PipelineKey k = keys[i];
+        if (k.clipped || k.spin_copy || k.fx || k.gs_filter || k.resample || k.depth_reset || k.single) continue;
+        k.no_kill = true;
+        keys.push_back(k);
+    }
     return keys;
 }
 
@@ -508,6 +528,7 @@ void GpuContext::warm_pipelines() {
         for (const PipelineKey& k : keys) {
             if (warm_stop_) return;
             if (k.spin_copy && !spin_copies()) continue;
+            if (k.no_kill && !no_kill()) continue;
             made += build_pipeline(k);
         }
         LOG_INFO("3D pipelines warmed: %d in %.0f ms", made, double(SDL_GetTicksNS() - t0) / 1e6);
@@ -682,8 +703,9 @@ SDL_GPUGraphicsPipeline* GpuContext::create_pipeline(const PipelineKey& key) {
                            : key.resample  ? fs_resample_
                            : key.fx        ? fs_fx_
                            : key.gs_filter ? fs_filter_
-                           : key.plain     ? fs_plain_
-                                           : fs_;
+                           : key.plain     ? (key.no_kill && fs_plain_nokill_ ? fs_plain_nokill_ : fs_plain_)
+                           : key.no_kill && fs_nokill_ ? fs_nokill_
+                                                       : fs_;
     info.vertex_input_state.vertex_buffer_descriptions = &vb;
     info.vertex_input_state.num_vertex_buffers = 1;
     info.vertex_input_state.vertex_attributes = attrs;

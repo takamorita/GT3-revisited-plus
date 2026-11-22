@@ -90,6 +90,11 @@ struct PipelineKey {
     // Writes the depth whatever is there and no colour: View3D's depth reset after an item
     // (DrawItem::depth_reset).
     bool depth_reset = false;
+    // A draw of which no fragment is discarded (no alpha test, fade or dropped triangle; View3D's
+    // draw_prim decides): model.frag's NO_KILL variant of the general or the PLAIN shader. With a
+    // shader that can discard and depth writes, GPUs test the depth after shading (the pixels hidden
+    // behind what is drawn are shaded all the same); these test it first.
+    bool no_kill = false;
     // A small depth bias towards the eye (scene::kCoplanarOverlay): wins over the earlier face it
     // lies on, as GT3's Z buffer lets it.
     bool depth_bias = false;
@@ -151,6 +156,8 @@ public:
     SDL_GPUSampleCount sample_count() const { return samples_; }
     // The SPIN_COPIES shader variants were created (PipelineKey::spin_copy).
     bool spin_copies() const { return vs_copy_ && fs_copy_; }
+    // The NO_KILL shader variants were created (PipelineKey::no_kill).
+    bool no_kill() const { return fs_nokill_ && fs_plain_nokill_; }
     int msaa() const { return 1 << int(samples_); }
     // The MSAA levels the GPU draws the 3D pass with (1 = off), lowest first.
     std::vector<int> msaa_levels() const;
@@ -216,7 +223,9 @@ private:
         FxFragment,
         CopyVertex,
         CopyFragment,
-        NoColorFragment
+        NoColorFragment,
+        NoKillFragment,
+        PlainNoKillFragment
     };
     SDL_GPUShader* make_shader(Stage stage);
     bool create_samplers();
@@ -248,6 +257,8 @@ private:
     SDL_GPUShader* fs_resample_ = nullptr; // model.frag's RESAMPLE variant (PipelineKey::resample)
     SDL_GPUShader* fs_fx_ = nullptr;       // model.frag's FX variant (PipelineKey::fx)
     SDL_GPUShader* fs_no_color_ = nullptr; // PipelineKey::depth_reset
+    // model.frag's NO_KILL variants of the general and the PLAIN shader (PipelineKey::no_kill; null: not used)
+    SDL_GPUShader *fs_nokill_ = nullptr, *fs_plain_nokill_ = nullptr;
     // model.vert's and model.frag's SPIN_COPIES variants (null: spin_turn items drawn plain)
     SDL_GPUShader *vs_copy_ = nullptr, *fs_copy_ = nullptr;
     SDL_GPUSampler* samplers_[8] = {};
