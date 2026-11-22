@@ -392,8 +392,13 @@ GLuint pass_fbo(SDL_GPUDevice* dev, const SDL_GPUTexture* color, Uint32 layer, U
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
     if (color) attach(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, color, layer, mip);
     if (depth) attach(GL_FRAMEBUFFER, depth_attachment(depth), depth, 0, 0);
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    if (status != GL_FRAMEBUFFER_COMPLETE) LOG_WARN("OpenGL ES frame buffer incomplete (0x%x)", status);
+#ifdef __EMSCRIPTEN__
+    // In WebGL the check waits for the GPU process to answer, behind every upload queued so far (about 120 ms in a race
+    // start, where the views make their targets): only with [video] gpu_debug.
+    if (dev->debug)
+#endif
+    if (GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER); status != GL_FRAMEBUFFER_COMPLETE)
+        LOG_WARN("OpenGL ES frame buffer incomplete (0x%x)", status);
     dev->fbos[key] = fbo;
     return fbo;
 }
