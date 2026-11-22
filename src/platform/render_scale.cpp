@@ -40,6 +40,10 @@ float dynamic_ceiling(int pixel_w, int pixel_h) {
 
 int default_msaa(bool mobile) { return mobile ? 2 : 4; }
 
+bool dynamic_resolution_default() {
+    return is_mobile();
+}
+
 bool is_mobile() {
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
     return true;

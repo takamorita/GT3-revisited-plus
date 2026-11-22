@@ -4,6 +4,7 @@
 // (Race screen code map: docs/dev/RACE.md.)
 
 #include "app/screen_race_impl.h"
+#include "platform/hooks.h"
 
 #include "sim/exact/race_flow.h"
 #include "sim/exact/race_record.h"
@@ -503,6 +504,7 @@ void RaceScreen::restart() {
     recorder_.set_paint_seed(paint_seed_);
     recorder_.set_opponent_paints(race_opponent_paints_);
     begin_license();
+    platform::on_race_start(); // (a platform's clocks for the start)
 }
 
 void RaceScreen::take_live_condition() {

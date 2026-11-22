@@ -19,6 +19,7 @@
 #include "platform/aspect.h"
 #include "platform/ios_files.h"
 #include "platform/music_folder.h"
+#include "platform/hooks.h"
 #include "platform/recent_discs.h"
 #include "platform/render_scale.h"
 #include "platform/mac_layer.h"
@@ -615,7 +616,8 @@ bool App::showroom_wheels() const {
 }
 
 bool App::dynamic_resolution() const {
-    return to_lower(config_.get("video", "dynamic_resolution").value_or(platform::is_mobile() ? "on" : "off")) == "on";
+    return to_lower(config_.get("video", "dynamic_resolution")
+                        .value_or(platform::dynamic_resolution_default() ? "on" : "off")) == "on";
 }
 
 void App::set_dynamic_resolution(bool on) {
@@ -927,8 +929,10 @@ SDL_AppResult App::iterate() {
                                  window_);
         return SDL_APP_FAILURE;
     }
+    // (every frame: also while it is off, platform/hooks.h)
+    const double wait_ms = platform::gpu_wait_ms(present_ms, frame_s * 1000.0, double(SDL_GetTicksNS() - now) / 1e6);
     if (dyn_on_) {
-        float s = dyn_.frame(frame_s * 1000.0, present_ms);
+        float s = dyn_.frame(frame_s * 1000.0, wait_ms);
         if (const double c = dyn_cycle_s(); c > 0) { // testing: down to 50% and back up every c seconds
             const double t = std::fmod(double(SDL_GetTicksNS()) / 1e9 / c, 1.0);
             const float top = dyn_.max_scale(), k = render::DynamicScale::kStep;

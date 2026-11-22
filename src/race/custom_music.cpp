@@ -1,4 +1,5 @@
 #include "race/custom_music.h"
+#include "platform/hooks.h"
 
 #include "audio/bgm.h"
 #include "audio/music_file.h"
@@ -181,6 +182,7 @@ void MusicLibrary::start_scan() {
     scanning_ = true;
     const std::string folder = folder_;
     thread_ = std::thread([this, folder] {
+        platform::background_thread();
         ScanInfo info;
         std::vector<CustomSong> songs = scan(folder, info, &stop_);
         std::lock_guard lock(mutex_);
@@ -499,6 +501,7 @@ void MusicLibrary::ensure_measuring() {
 }
 
 void MusicLibrary::measure_loop() {
+    platform::background_thread();
     SDL_SetCurrentThreadPriority(SDL_THREAD_PRIORITY_LOW);
     for (;;) {
         // A song asked for first, else a disc song between races; nothing while the game is away.
