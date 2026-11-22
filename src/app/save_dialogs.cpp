@@ -8,7 +8,9 @@
 // (platform/mac_dialog.h), which give the window its keyboard focus back when they close; on
 // Android the system's document picker (content:// URIs). iOS has no SDL dialogs: an import
 // opens the system's document picker (platform/ios_files.h), and an export goes into the user
-// data folder's exports/, which the Files app shows (On My iPhone > GT3 Revisited).
+// data folder's exports/, which the Files app shows (On My iPhone > GT3 Revisited). A browser has
+// no SDL dialogs either: an import opens the page's file picker (platform/web/app_hooks_web.cpp),
+// and an export is written into /tmp, which the page then downloads.
 // Each dialog has a number (its callback's userdata): the page can give one up
 // (FileDialogs::cancel, its waiting window's CANCEL), and an answer it sends later is
 // dropped. On macOS giving up also closes the sheet.
@@ -142,6 +144,18 @@ void install_save_dialogs(App& app) {
 #else
         (void)data_dir;
 #endif
+#if defined(__EMSCRIPTEN__)
+        if (open) {
+            if (platform::show_document_picker(window, filters, nfilters,
+                                               [ticket](std::string path) { answer(ticket, std::move(path)); }))
+                return;
+        } else {
+            // (downloaded once the caller has written it: poll)
+            SDL_CreateDirectory("/tmp/exports");
+            answer(ticket, "/tmp/exports/" + (name.empty() ? std::string("export") : name));
+            return;
+        }
+#endif
         void* user = reinterpret_cast<void*>(ticket);
         if (open) // (no file types for an export: the page chose the format and the name's extension)
             SDL_ShowOpenFileDialog(on_dialog, user, window, filters, nfilters, nullptr, false);
@@ -158,6 +172,11 @@ void install_save_dialogs(App& app) {
         dialog_over(window, *input); // (a frame after SDL's callback: the sheet has gone)
         if (g_export && !a->empty() && a->rfind("content://", 0) != 0)
             if (size_t sl = a->find_last_of("/\\"); sl != std::string::npos) g_export_dir = a->substr(0, sl + 1);
+#if defined(__EMSCRIPTEN__)
+        // The callers write an export as soon as this returns its place, in this iteration of the main loop; the
+        // page downloads it after the iteration.
+        if (g_export && !a->empty()) platform::download_after_write(*a, a->substr(a->find_last_of('/') + 1));
+#endif
         return a;
     };
     d.cancel = [window, input]() {

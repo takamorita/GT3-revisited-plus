@@ -40,6 +40,9 @@ float dynamic_ceiling(int pixel_w, int pixel_h);
 // without 2x (Mali) get 4x instead (GpuContext::set_msaa), not none.
 int default_msaa(bool mobile);
 
+// [video] dynamic_resolution when the config has none: on in a browser and on phones and tablets.
+bool dynamic_resolution_default();
+
 // True on Android and iOS builds.
 bool is_mobile();
 

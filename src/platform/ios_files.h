@@ -25,6 +25,12 @@ namespace gt3r::platform {
 // and elsewhere: SDL has no file dialog on iOS.
 bool show_document_picker(SDL_Window* window, const SDL_DialogFileFilter* filters, int count,
                           std::function<void(std::string path)> done);
+#if defined(__EMSCRIPTEN__)
+// The browser (platform/web/app_hooks_web.cpp): after this iteration of the main loop, the page downloads the file
+// at `path` (an export the game writes there in this iteration) as `name`, then deletes it. Nothing when the file
+// was not written.
+void download_after_write(const std::string& path, const std::string& name);
+#endif
 // iOS: the same for one folder (the music folder, read where it is).
 bool show_folder_picker(SDL_Window* window, std::function<void(std::string path)> done);
 

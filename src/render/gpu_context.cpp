@@ -1,4 +1,5 @@
 #include "render/gpu_context.h"
+#include "platform/hooks.h"
 
 #include "base/log.h"
 #include "platform/render_scale.h"
@@ -523,6 +524,7 @@ void GpuContext::warm_pipelines() {
     warm_ = true;
     warm_stop_ = false;
     warm_thread_ = std::thread([this, keys = warm_keys()] {
+        platform::background_thread();
         const u64 t0 = SDL_GetTicksNS();
         int made = 0;
         for (const PipelineKey& k : keys) {

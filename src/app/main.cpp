@@ -9,6 +9,8 @@
 
 #include <SDL3/SDL_main.h>
 
+#include "platform/hooks.h"
+
 using gt3r::App;
 
 #ifdef SDL_PLATFORM_WINDOWS
@@ -22,6 +24,7 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 #endif
 
 SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
+    gt3r::platform::on_start(); // (before SDL: a platform's log)
     if (gt3r::wants_launch_help(argc, argv)) { // before SDL starts: no window
         gt3r::print_launch_help();
         return SDL_APP_SUCCESS;
@@ -30,6 +33,7 @@ SDL_AppResult SDL_AppInit(void** state, int argc, char** argv) {
         return *opens ? SDL_APP_SUCCESS : SDL_APP_FAILURE;
     auto* app = new App();
     *state = app;
+    gt3r::platform::on_app_created(*app);
     return app->init(argc, argv) ? SDL_APP_CONTINUE : SDL_APP_FAILURE;
 }
 
@@ -43,4 +47,5 @@ void SDL_AppQuit(void* state, SDL_AppResult) {
         delete app;
     }
     gt3r::log_file::close();
+    gt3r::platform::on_quit();
 }

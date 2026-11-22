@@ -112,8 +112,12 @@ TEST(platform_render_scale) {
     CHECK(platform::dynamic_ceiling(2400, 1080) == 1.0f); // 20:9 phone
     CHECK(platform::dynamic_ceiling(2560, 1600) == 1.0f); // 16:10 tablet: 1440 lines
     CHECK(std::fabs(platform::dynamic_ceiling(3840, 2160) - 1440.0f / 2160.0f) < 1e-4f);
-    // MSAA when the config has none: 4x on desktop, 2x on phones and tablets.
+    // MSAA when the config has none: 4x on desktop, 2x on phones and tablets (and in a browser).
+#if defined(__EMSCRIPTEN__)
+    CHECK(platform::default_msaa(false) == 2);
+#else
     CHECK(platform::default_msaa(false) == 4);
+#endif
     CHECK(platform::default_msaa(true) == 2);
 }
 

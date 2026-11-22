@@ -19,6 +19,7 @@
 #include "platform/aspect.h"
 #include "platform/ios_files.h"
 #include "platform/music_folder.h"
+#include "platform/hooks.h"
 #include "platform/recent_discs.h"
 #include "platform/render_scale.h"
 #include "platform/mac_layer.h"
@@ -132,6 +133,13 @@ bool App::init(int argc, char** argv) {
     SDL_WindowFlags win_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY;
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
     win_flags |= SDL_WINDOW_FULLSCREEN; // immersive: hide system bars
+#endif
+#ifdef __EMSCRIPTEN__
+    // In a browser the renderer is always OpenGL ES (WebGL 2), so the window is made for it at once. Made without
+    // SDL_WINDOW_OPENGL, SDL makes it again for its GLES2 renderer, and where the display is not at 100% (a device
+    // pixel ratio other than 1) that second window keeps 1280 x 720 and no longer follows the browser window:
+    // destroying the first one sets the canvas's CSS size to 1 x 1, which the second takes for no CSS sizing.
+    win_flags |= SDL_WINDOW_OPENGL;
 #endif
 #if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
     // [video] fullscreen = on | off (desktop; F11 and the Settings screen change it)
@@ -488,8 +496,8 @@ void App::apply_frame_limit() {
     const double rate = interval > 1 ? hz / interval : 0; // 0: as fast as vsync allows
     if (rate == frame_limit_rate_) return;
     frame_limit_rate_ = rate;
-    if (rate > 0) SDL_SetHint(SDL_HINT_MAIN_CALLBACK_RATE, std::to_string(rate).c_str());
-    else SDL_ResetHint(SDL_HINT_MAIN_CALLBACK_RATE);
+    // ("0", not a reset: SDL's loops take it as no hint, and in a browser the hint keeps SDL_SetRenderVSync off them)
+    SDL_SetHint(SDL_HINT_MAIN_CALLBACK_RATE, rate > 0 ? std::to_string(rate).c_str() : "0");
     LOG_INFO("Display %.0f Hz: drawing every %s", hz,
              interval == 1 ? "refresh" : (std::to_string(interval) + " refreshes").c_str());
 }
@@ -615,7 +623,8 @@ bool App::showroom_wheels() const {
 }
 
 bool App::dynamic_resolution() const {
-    return to_lower(config_.get("video", "dynamic_resolution").value_or(platform::is_mobile() ? "on" : "off")) == "on";
+    return to_lower(config_.get("video", "dynamic_resolution")
+                        .value_or(platform::dynamic_resolution_default() ? "on" : "off")) == "on";
 }
 
 void App::set_dynamic_resolution(bool on) {
@@ -928,8 +937,10 @@ SDL_AppResult App::iterate() {
                                  window_);
         return SDL_APP_FAILURE;
     }
+    // (every frame: also while it is off, platform/hooks.h)
+    const double wait_ms = platform::gpu_wait_ms(present_ms, frame_s * 1000.0, double(SDL_GetTicksNS() - now) / 1e6);
     if (dyn_on_) {
-        float s = dyn_.frame(frame_s * 1000.0, present_ms);
+        float s = dyn_.frame(frame_s * 1000.0, wait_ms);
         if (const double c = dyn_cycle_s(); c > 0) { // testing: down to 50% and back up every c seconds
             const double t = std::fmod(double(SDL_GetTicksNS()) / 1e9 / c, 1.0);
             const float top = dyn_.max_scale(), k = render::DynamicScale::kStep;

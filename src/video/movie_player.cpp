@@ -1,4 +1,5 @@
 #include "video/movie_player.h"
+#include "platform/hooks.h"
 
 #include "base/log.h"
 
@@ -78,7 +79,10 @@ void MoviePlayer::begin(std::unique_ptr<Movie> movie, float volume, double start
         movie_->set_audio_enabled(false);
     }
     stats_.audio = audio_ != nullptr;
-    worker_ = std::thread([this] { run(); });
+    worker_ = std::thread([this] {
+        platform::background_thread();
+        run();
+    });
 }
 
 void MoviePlayer::stop() {
