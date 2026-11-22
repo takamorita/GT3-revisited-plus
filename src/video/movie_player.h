@@ -21,6 +21,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_map>
 
 namespace gt3r::video {
 
@@ -127,6 +128,11 @@ private:
     std::atomic<bool> audio_done_{false};
     std::atomic<bool> field_split_{false};
     FieldLayoutDetector layout_; // worker thread
+    // The decided layouts of the movies played (by file size: the disc's movies all differ in size), kept by stop() and
+    // read by begin(), on the thread that owns the players. Shared by the players: a screen made anew plays its movies
+    // again.
+    inline static std::unordered_map<u64, FieldLayoutDetector> layouts_;
+    bool shown_split_ = false;   // the layout of the picture now in texture_ (what picture_rects draws by)
     double start_seconds_ = 0;
 
     mutable std::mutex mutex_;

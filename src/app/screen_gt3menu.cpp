@@ -584,7 +584,11 @@ private:
         }
         try {
             movie_.set_audio_device(app.audio().output_device_id());
-            movie_.start(video::open_movie(*app.vfs(), path), app.audio().music_volume());
+            // Every menu movie loops. MoviePlayer's own loop keeps the field layout from pass to pass; starting it
+            // over by hand at each end voted again, and the last picture of the pass before was drawn with both
+            // fields stacked for a frame (a squashed double picture once a loop).
+            App* a = &app;
+            movie_.start_loop([a, path] { return video::open_movie(*a->vfs(), path); }, app.audio().music_volume());
         } catch (const std::exception& e) {
             LOG_WARN("gt3menu: movie %s: %s", path.c_str(), e.what());
             movie_path_.clear();
@@ -641,8 +645,7 @@ private:
             SDL_SetTextureScaleMode(frame_, SDL_SCALEMODE_LINEAR);
         }
         if (!movie_path_.empty()) {
-            if (movie_.finished()) start_movie(app, movie_path_); // loops
-            movie_.update(r);
+            movie_.update(r); // loops (start_loop)
         }
         const SDL_Point size = app.menu_model_size(); // (of the window: before the target changes)
         SDL_Texture* prev = SDL_GetRenderTarget(r);

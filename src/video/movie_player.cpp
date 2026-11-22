@@ -53,8 +53,12 @@ void MoviePlayer::begin(std::unique_ptr<Movie> movie, float volume, double start
     video_done_ = false;
     audio_done_ = !info_.has_audio;
     audio_frames_put_ = 0;
-    field_split_ = false;
+    // A movie is voted on from its first pictures, unless it was played before (a loop's next pass, a course's movie
+    // in the course select again): then it starts with the layout that play decided, as the vote on its first
+    // pictures can waver. (The picture still on screen is drawn by its own layout either way: shown_split_.)
     layout_ = FieldLayoutDetector();
+    if (auto it = layouts_.find(info_.file_size); info_.file_size && it != layouts_.end()) layout_ = it->second;
+    field_split_ = layout_.field_split();
     ready_.clear();
 
     if (info_.has_audio) {
@@ -82,6 +86,8 @@ void MoviePlayer::stop() {
         quit_ = true;
         worker_.join();
     }
+    // (The worker, the layout's only writer, has stopped.)
+    if (movie_ && info_.file_size && layout_.decided()) layouts_[info_.file_size] = layout_;
     if (audio_) {
         SDL_DestroyAudioStream(audio_);
         audio_ = nullptr;
@@ -153,7 +159,7 @@ void MoviePlayer::run() {
                 // Pictures go out one frame behind the decoder: deinterlacing a frame needs the
                 // next one's fields. The last frame goes out once the stream has ended.
                 if (got) {
-                    layout_.add(f);
+                    layout_.add(f); // (no change once decided)
                     field_split_ = layout_.field_split();
                 }
                 if (pending.width > 0) emit(prev, pending, got ? f : pending, t0);
@@ -245,11 +251,12 @@ void MoviePlayer::picture_rects(const SDL_FRect& display, SDL_FRect& src, SDL_FR
     float w = float(tex_w_), h = float(tex_h_);
     src = {0, 0, w, h};
     dst = display;
-    if (!field_split_ || tex_h_ < 4) return;
+    if (tex_h_ < 4) return;
     if (tex_stacked_) { // deinterlaced: a full picture per field, stacked
         src = {0, second_field() ? h / 2 : 0, w, h / 2};
         return;
     }
+    if (!shown_split_) return;
     // Not deinterlaced (field_layout.h's can_deinterlace): the field itself, line-doubled. First field (top half, even frame lines) for the first half of the frame
     // period, then the second field (bottom half, odd lines). Frame line Y of
     // field line k is 2k (+1 for the second field), so mapping frame row
@@ -264,7 +271,7 @@ void MoviePlayer::picture_rects(const SDL_FRect& display, SDL_FRect& src, SDL_FR
 }
 
 bool MoviePlayer::second_field() const {
-    if (!field_split_) return false;
+    if (!shown_split_) return false;
     // The second field's time, by the same early rule as the frames': with 29.97 fps at 60 Hz a
     // refresh that took a frame up to 2 ms early came 16.67 ms later just before its second
     // field, so for seconds at a time only first fields were shown.
@@ -371,6 +378,9 @@ bool MoviePlayer::update(SDL_Renderer* renderer) {
     if (texture_)
         SDL_UpdateYUVTexture(texture_, nullptr, frame.y.data(), frame.width, frame.u.data(), frame.chroma_width(),
                              frame.v.data(), frame.chroma_width());
+    // The picture now on screen is drawn by the layout known when it came: the texture keeps the last picture of a
+    // movie after the next one starts (another course's in the course select), and the next one's vote starts over.
+    shown_split_ = field_split_ || frame.fields_stacked; // (a deinterlaced picture came split)
     std::lock_guard lock(mutex_);
     free_.push_back(std::move(frame));
     return true;
