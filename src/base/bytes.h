@@ -47,4 +47,26 @@ inline bool has_magic(ByteSpan d, const char* magic) {
     return d.size() >= n && std::memcmp(d.data(), magic, n) == 0;
 }
 
+// A quick hash of a block, 8 bytes a step: for a cache that checks a file is the one it holds (a
+// course's few MB took 24 ms a byte at a time in a browser). Never stored: it may change.
+inline u64 quick_hash(ByteSpan b) {
+    u64 h = 0x9E3779B97F4A7C15ull ^ u64(b.size());
+    auto mix = [&h](u64 w) {
+        w *= 0x87C37B91114253D5ull;
+        w = (w << 31) | (w >> 33);
+        h ^= w * 0x4CF5AD432745937Full;
+        h = ((h << 27) | (h >> 37)) * 5 + 0x52DCE729;
+    };
+    size_t i = 0;
+    for (; i + 8 <= b.size(); i += 8) {
+        u64 w;
+        std::memcpy(&w, b.data() + i, 8);
+        mix(w);
+    }
+    u64 tail = 0;
+    if (i < b.size()) std::memcpy(&tail, b.data() + i, b.size() - i);
+    mix(tail);
+    return h;
+}
+
 } // namespace gt3r

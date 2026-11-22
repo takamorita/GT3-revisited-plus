@@ -5,6 +5,8 @@
 
 #include <functional>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
@@ -61,8 +63,12 @@ public:
     // The disc's packed game program (CORE.GT3, outside GT3.VOL), when the owner of the
     // volume provides it (Disc does). Read-only reference data for loaders that need a
     // table from the program; the engine never executes it.
+    // It is read once and kept (the races, the menus and GT mode ask for it again and again).
     void set_program_reader(std::function<Bytes()> f) { program_reader_ = std::move(f); }
     std::optional<Bytes> read_program() const;
+    // The kept copy itself (nullptr without one): a cache of something worked out from it keys on
+    // it (race::exact_program_data).
+    std::shared_ptr<const Bytes> program() const;
     // The release's data set (disc/region.h), set by the owner (Disc: from its program).
     void set_region(Region r) { data_ = RegionData{r}; }
     Region region() const { return data_.region; }
@@ -79,6 +85,8 @@ private:
     void walk(ByteSpan toc, u32 node, const std::string& prefix, int depth, u8 part);
     void read_toc(u8 part);
     std::function<Bytes()> program_reader_;
+    mutable std::mutex program_mutex_;
+    mutable std::shared_ptr<const Bytes> program_; // the kept copy (null: none, or it could not be read)
     RegionData data_;
     std::string disc_key_, serial_;
     static std::string node_name(ByteSpan toc, u32 offset);

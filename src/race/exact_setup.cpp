@@ -4,6 +4,7 @@
 
 #include "base/log.h"
 #include "disc/core_image.h"
+#include "disc/volume.h"
 #include "formats/db/gt_db.h"
 #include "game/data/car_database.h"
 #include "game/net_car.h"
@@ -28,18 +29,18 @@ std::mutex g_mutex;
 } // namespace
 
 std::shared_ptr<const ex::ProgramData> exact_program_data(const Vfs& vfs, std::string* error) {
-    static u64 key = 0;
+    static std::shared_ptr<const Bytes> key;
     static std::shared_ptr<const ex::ProgramData> data;
     static std::string err;
     std::lock_guard<std::mutex> lock(g_mutex);
-    std::optional<Bytes> core = vfs.read(Vfs::kProgramFile);
+    // The disc's kept copy (Volume::program, what Vfs::kProgramFile reads): the same copy is not decoded again.
+    std::shared_ptr<const Bytes> core = vfs.base() ? vfs.base()->program() : nullptr;
     if (!core || core->empty()) {
         if (error) *error = "the disc's program (CORE.GT3) cannot be read";
         return nullptr;
     }
-    const u64 k = hash_bytes(*core);
-    if (k != key) {
-        key = k;
+    if (core != key) {
+        key = core;
         data.reset();
         err.clear();
         try {
@@ -95,7 +96,7 @@ std::shared_ptr<const ex::RaceCourse> exact_course(ByteSpan file, const std::str
     static const ex::ProgramData* key_data = nullptr;
     static std::shared_ptr<const ex::RaceCourse> course;
     std::lock_guard<std::mutex> lock(g_mutex);
-    const u64 k = hash_bytes(file) ^ hash_bytes(ByteSpan(reinterpret_cast<const u8*>(label.data()), label.size()));
+    const u64 k = quick_hash(file) ^ hash_bytes(ByteSpan(reinterpret_cast<const u8*>(label.data()), label.size()));
     if (k != key || key_data != &d || !course) {
         course = ex::RaceCourse::load(file, d);
         key = k, key_data = &d;
