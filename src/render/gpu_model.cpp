@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <type_traits>
 #include <unordered_set>
 
 namespace gt3r::render {
@@ -25,6 +26,40 @@ ModelStats model_stats(const scene::Model& model, int lod) {
 
 namespace {
 
+// A mesh's sphere: its box centre, the farthest vertex.
+void mesh_sphere(const std::vector<scene::Vertex>& vs, Vec3& center, float& radius) {
+    if (vs.empty()) return;
+    float lo[3], hi[3];
+    for (int k = 0; k < 3; ++k) lo[k] = hi[k] = vs[0].pos[k];
+    for (const scene::Vertex& v : vs)
+        for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], v.pos[k]), hi[k] = std::max(hi[k], v.pos[k]);
+    center = {(lo[0] + hi[0]) * 0.5f, (lo[1] + hi[1]) * 0.5f, (lo[2] + hi[2]) * 0.5f};
+    float r2 = 0;
+    for (const scene::Vertex& v : vs) {
+        Vec3 d = Vec3{v.pos[0], v.pos[1], v.pos[2]} - center;
+        r2 = std::max(r2, dot(d, d));
+    }
+    radius = std::sqrt(r2);
+}
+
+// A primitive's sphere: the box centre of the vertices its `count` indices name, the farthest of them.
+GpuModel::MeshInfo::Sphere primitive_sphere(const std::vector<scene::Vertex>& vs, const u32* idx, u32 count) {
+    float lo[3], hi[3];
+    for (int k = 0; k < 3; ++k) lo[k] = hi[k] = vs[idx[0]].pos[k];
+    for (u32 i = 0; i < count; ++i)
+        for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], vs[idx[i]].pos[k]), hi[k] = std::max(hi[k], vs[idx[i]].pos[k]);
+    GpuModel::MeshInfo::Sphere sp;
+    sp.center = {(lo[0] + hi[0]) * 0.5f, (lo[1] + hi[1]) * 0.5f, (lo[2] + hi[2]) * 0.5f};
+    float r2 = 0;
+    for (u32 i = 0; i < count; ++i) {
+        const float* v = vs[idx[i]].pos;
+        const Vec3 d = Vec3{v[0], v[1], v[2]} - sp.center;
+        r2 = std::max(r2, dot(d, d));
+    }
+    sp.radius = std::sqrt(r2);
+    return sp;
+}
+
 // Meshes -> one vertex and one index list, per-mesh draw info; `lines`: wireframe edge lists.
 void assemble(const std::vector<scene::Mesh>& meshes, size_t texture_count, bool lines,
               std::vector<scene::Vertex>& vertices, std::vector<u32>& indices, std::vector<GpuModel::MeshInfo>& out) {
@@ -36,19 +71,7 @@ void assemble(const std::vector<scene::Mesh>& meshes, size_t texture_count, bool
         info.vertex_offset = s32(vertices.size());
         info.index_offset = u32(indices.size());
         vertices.insert(vertices.end(), m.vertices.begin(), m.vertices.end());
-        if (!m.vertices.empty()) {
-            float lo[3], hi[3];
-            for (int k = 0; k < 3; ++k) lo[k] = hi[k] = m.vertices[0].pos[k];
-            for (const scene::Vertex& v : m.vertices)
-                for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], v.pos[k]), hi[k] = std::max(hi[k], v.pos[k]);
-            info.center = {(lo[0] + hi[0]) * 0.5f, (lo[1] + hi[1]) * 0.5f, (lo[2] + hi[2]) * 0.5f};
-            float r2 = 0;
-            for (const scene::Vertex& v : m.vertices) {
-                Vec3 d = Vec3{v.pos[0], v.pos[1], v.pos[2]} - info.center;
-                r2 = std::max(r2, dot(d, d));
-            }
-            info.radius = std::sqrt(r2);
-        }
+        mesh_sphere(m.vertices, info.center, info.radius);
         u32 nv = u32(m.vertices.size());
         // Drop out-of-range indices instead of letting the GPU read garbage.
         for (const scene::Primitive& p : m.primitives) {
@@ -66,22 +89,8 @@ void assemble(const std::vector<scene::Mesh>& meshes, size_t texture_count, bool
             if (!q.index_count) continue;
             info.primitives.push_back(q);
             // Its sphere: the box centre, the farthest vertex.
-            const u32* idx = indices.data() + info.index_offset + q.first_index;
-            float lo[3], hi[3];
-            for (int k = 0; k < 3; ++k) lo[k] = hi[k] = m.vertices[idx[0]].pos[k];
-            for (u32 i = 0; i < q.index_count; ++i)
-                for (int k = 0; k < 3; ++k)
-                    lo[k] = std::min(lo[k], m.vertices[idx[i]].pos[k]), hi[k] = std::max(hi[k], m.vertices[idx[i]].pos[k]);
-            GpuModel::MeshInfo::Sphere sp;
-            sp.center = {(lo[0] + hi[0]) * 0.5f, (lo[1] + hi[1]) * 0.5f, (lo[2] + hi[2]) * 0.5f};
-            float r2 = 0;
-            for (u32 i = 0; i < q.index_count; ++i) {
-                const float* v = m.vertices[idx[i]].pos;
-                const Vec3 d = Vec3{v[0], v[1], v[2]} - sp.center;
-                r2 = std::max(r2, dot(d, d));
-            }
-            sp.radius = std::sqrt(r2);
-            info.primitive_spheres.push_back(sp);
+            info.primitive_spheres.push_back(
+                primitive_sphere(m.vertices, indices.data() + info.index_offset + q.first_index, q.index_count));
         }
         // Unique edges for the wireframe view.
         info.line_first = u32(indices.size()) - info.index_offset;
@@ -213,11 +222,70 @@ bool GpuModel::update_textures(const std::vector<TextureUpdate>& updates) {
 GpuModel::GpuModel(GpuContext& ctx, const GpuModel& textures)
     : ctx_(&ctx), device_(ctx.device()), texture_source_(&textures) {}
 
+void GpuModel::assemble_geometry(const std::vector<scene::Mesh>& meshes, size_t texture_count,
+                                 std::vector<scene::Vertex>& vertices, std::vector<u32>& indices,
+                                 std::vector<MeshInfo>& infos) {
+    assemble(meshes, texture_count, false, vertices, indices, infos);
+}
+
+std::vector<GpuModel::TriangleLayout> GpuModel::triangle_layout(const std::vector<scene::Mesh>& meshes) {
+    std::vector<TriangleLayout> out;
+    out.reserve(meshes.size());
+    for (const scene::Mesh& m : meshes) out.push_back({m.vertices.size(), m.node, m.lod, m.transform, m.indices, m.primitives});
+    return out;
+}
+
+bool GpuModel::same_triangles(const std::vector<TriangleLayout>& last, const std::vector<scene::Mesh>& meshes) {
+    static_assert(std::is_trivially_copyable_v<scene::Primitive>, "compared as bytes");
+    if (meshes.size() != last.size()) return false;
+    for (size_t i = 0; i < meshes.size(); ++i) {
+        const scene::Mesh& m = meshes[i];
+        const TriangleLayout& l = last[i];
+        if (m.vertices.size() != l.vertex_count || m.node != l.node || m.lod != l.lod || m.transform != l.transform ||
+            m.indices != l.indices || m.primitives.size() != l.primitives.size() ||
+            (!m.primitives.empty() &&
+             std::memcmp(m.primitives.data(), l.primitives.data(), m.primitives.size() * sizeof(scene::Primitive)) != 0))
+            return false;
+    }
+    return true;
+}
+
+void GpuModel::place_vertices(const std::vector<scene::Mesh>& meshes, const std::vector<u32>& indices,
+                              std::vector<MeshInfo>& infos, std::vector<scene::Vertex>& vertices) {
+    for (size_t i = 0; i < meshes.size(); ++i) {
+        const scene::Mesh& m = meshes[i];
+        MeshInfo& info = infos[i];
+        if (!m.vertices.empty())
+            std::memcpy(vertices.data() + info.vertex_offset, m.vertices.data(), m.vertices.size() * sizeof(scene::Vertex));
+        mesh_sphere(m.vertices, info.center, info.radius);
+        for (size_t j = 0; j < info.primitives.size(); ++j) {
+            const scene::Primitive& q = info.primitives[j];
+            info.primitive_spheres[j] = primitive_sphere(m.vertices, indices.data() + info.index_offset + q.first_index, q.index_count);
+        }
+    }
+}
+
 bool GpuModel::update_geometry(const std::vector<scene::Mesh>& meshes) {
+    // The same triangles as the last upload (an animated node that only moved or morphed): only the vertices
+    // change. Each mesh's vertices go where assemble put them, and the spheres are worked out as assemble does
+    // (mesh_sphere, primitive_sphere), from the index buffer it made; that buffer is not sent again.
+    if (vertices_ && !uploaded_indices_.empty() && meshes.size() == meshes_.size() && same_triangles(last_, meshes)) {
+        std::vector<scene::Vertex>& vertices = scratch_vertices_;
+        vertices.resize(vertex_count_);
+        place_vertices(meshes, uploaded_indices_, meshes_, vertices);
+        const u32 vsize = u32(vertices.size() * sizeof(scene::Vertex));
+        if (vsize == 0) return true;
+        Upload up{vertices_, vertices.data(), vsize};
+        const bool ok = stage(&up, 1);
+        if (ok && keep_) geometry_.vertices.assign(vertices.begin(), vertices.end());
+        if (!ok) meshes_.clear(), node_start_.clear(), node_meshes_.clear(), uploaded_indices_.clear(), last_.clear(), geometry_ = {};
+        return ok;
+    }
     std::vector<scene::Vertex> vertices;
     std::vector<u32> indices;
     meshes_.clear();
-    assemble(meshes, textures().size(), false, vertices, indices, meshes_);
+    last_.clear();
+    assemble_geometry(meshes, textures().size(), vertices, indices, meshes_);
     index_nodes();
     vertex_count_ = vertices.size();
     const u32 vsize = u32(vertices.size() * sizeof(scene::Vertex)), isize = u32(indices.size() * sizeof(u32));
@@ -233,6 +301,7 @@ bool GpuModel::update_geometry(const std::vector<scene::Mesh>& meshes) {
     if (ok && keep_) geometry_ = {std::move(vertices), indices};
     if (ok && !same_indices) uploaded_indices_ = std::move(indices);
     if (!ok) meshes_.clear(), node_start_.clear(), node_meshes_.clear(), uploaded_indices_.clear(), geometry_ = {};
+    if (ok) last_ = triangle_layout(meshes); // (what the fast path compares the next meshes with)
     return ok;
 }
 

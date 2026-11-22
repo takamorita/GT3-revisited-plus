@@ -11,8 +11,11 @@
 #include "render/view3d.h"
 #include "test_framework.h"
 
+#include <vector>
+
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 using namespace gt3r;
 using namespace gt3r::render;
@@ -314,6 +317,89 @@ TEST(render_model_stats_by_lod) {
     CHECK(all.meshes == 3 && l0.meshes == 1 && l2.meshes == 1);
     CHECK(l0.triangles > l2.triangles);
     CHECK(all.triangles == l0.triangles + model_stats(m, 1).triangles + l2.triangles);
+}
+
+// update_geometry's fast path (the course's moving nodes: the same triangles, the vertices moved or morphed) gives
+// what a full update of the moved meshes gives: the vertices where they go, the same indices and draw info, the
+// spheres worked out again (bit for bit, as both use the same functions).
+TEST(render_update_geometry_moved_vertices_match_a_full_update) {
+    std::vector<scene::Mesh> a;
+    for (int v : {0, 2})
+        for (scene::Mesh& m : make_test_model(v).meshes) a.push_back(std::move(m));
+    for (size_t i = 0; i < a.size(); ++i) a[i].node = int(i % 3);
+    // A triangle naming a vertex past the mesh's (assemble drops it: the fast path must use the indices it kept).
+    scene::Mesh& first = a[0];
+    first.indices.insert(first.indices.end(), {0, 1, u32(first.vertices.size())});
+    first.primitives.back().index_count += 3;
+    // A': every vertex moved, each by its own amount (a turn and a morph change the spheres too).
+    std::vector<scene::Mesh> moved = a;
+    for (scene::Mesh& m : moved)
+        for (size_t k = 0; k < m.vertices.size(); ++k) {
+            scene::Vertex& v = m.vertices[k];
+            v.pos[0] = v.pos[0] * 1.5f + 0.25f * float(k % 7);
+            v.pos[1] = v.pos[1] - 2.0f + 0.125f * float(k % 5);
+            v.pos[2] = -v.pos[2] * 0.75f;
+            v.uv[0] += 0.5f;
+            v.color ^= 0x00FF00FFu;
+        }
+    const size_t textures = 4;
+    std::vector<scene::Vertex> fast_v;
+    std::vector<u32> fast_i;
+    std::vector<GpuModel::MeshInfo> fast;
+    GpuModel::assemble_geometry(a, textures, fast_v, fast_i, fast);
+    const std::vector<GpuModel::TriangleLayout> layout = GpuModel::triangle_layout(a);
+    CHECK(GpuModel::same_triangles(layout, moved));
+    GpuModel::place_vertices(moved, fast_i, fast, fast_v);
+
+    std::vector<scene::Vertex> full_v;
+    std::vector<u32> full_i;
+    std::vector<GpuModel::MeshInfo> full;
+    GpuModel::assemble_geometry(moved, textures, full_v, full_i, full);
+
+    CHECK(fast_v.size() == full_v.size() &&
+          std::memcmp(fast_v.data(), full_v.data(), fast_v.size() * sizeof(scene::Vertex)) == 0);
+    CHECK(fast_i == full_i);
+    CHECK(fast.size() == full.size());
+    for (size_t i = 0; i < fast.size() && i < full.size(); ++i) {
+        const GpuModel::MeshInfo &f = fast[i], &g = full[i];
+        CHECK(f.vertex_offset == g.vertex_offset && f.index_offset == g.index_offset);
+        CHECK(f.node == g.node && f.lod == g.lod && f.line_first == g.line_first && f.line_count == g.line_count);
+        CHECK(f.primitives.size() == g.primitives.size());
+        for (size_t j = 0; j < f.primitives.size() && j < g.primitives.size(); ++j) {
+            const scene::Primitive &p = f.primitives[j], &q = g.primitives[j];
+            CHECK(p.first_index == q.first_index && p.index_count == q.index_count && p.texture == q.texture &&
+                  p.flags == q.flags);
+        }
+        CHECK(f.center.x == g.center.x && f.center.y == g.center.y && f.center.z == g.center.z && f.radius == g.radius);
+        CHECK(f.primitive_spheres.size() == g.primitive_spheres.size());
+        for (size_t j = 0; j < f.primitive_spheres.size() && j < g.primitive_spheres.size(); ++j) {
+            const GpuModel::MeshInfo::Sphere &p = f.primitive_spheres[j], &q = g.primitive_spheres[j];
+            CHECK(p.center.x == q.center.x && p.center.y == q.center.y && p.center.z == q.center.z && p.radius == q.radius);
+        }
+    }
+    // The spheres did change (the test moves the vertices enough to tell).
+    std::vector<scene::Vertex> before_v;
+    std::vector<u32> before_i;
+    std::vector<GpuModel::MeshInfo> before;
+    GpuModel::assemble_geometry(a, textures, before_v, before_i, before);
+    CHECK(before[0].radius != full[0].radius && before[0].primitive_spheres[0].radius != full[0].primitive_spheres[0].radius);
+
+    // Not the same triangles: another index, a primitive's state, a vertex more, a mesh less, another node.
+    std::vector<scene::Mesh> other = moved;
+    other[1].indices[0] = other[1].indices[1];
+    CHECK(!GpuModel::same_triangles(layout, other));
+    other = moved;
+    other[1].primitives[0].texture += 1;
+    CHECK(!GpuModel::same_triangles(layout, other));
+    other = moved;
+    other[1].vertices.push_back(other[1].vertices[0]);
+    CHECK(!GpuModel::same_triangles(layout, other));
+    other = moved;
+    other.pop_back();
+    CHECK(!GpuModel::same_triangles(layout, other));
+    other = moved;
+    other[0].node = 7;
+    CHECK(!GpuModel::same_triangles(layout, other));
 }
 
 TEST(render_ground_grid) {

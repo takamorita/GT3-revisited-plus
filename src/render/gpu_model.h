@@ -9,6 +9,7 @@
 #include "render/math3d.h"
 #include "scene/model.h"
 
+#include <array>
 #include <vector>
 
 namespace gt3r::render {
@@ -85,6 +86,26 @@ public:
         u32 width = 0, height = 0;
     };
 
+    // update_geometry's CPU part, without the GPU (the tests call these). assemble_geometry: `meshes` into one vertex
+    // and index list and their draw info (no wireframe lines), as a full update does. TriangleLayout: a mesh but its
+    // vertices; same_triangles: whether `meshes` have the triangles of the meshes `last` was taken from (only their
+    // vertices moved or morphed). place_vertices: for such meshes, their vertices into `vertices` where
+    // assemble_geometry put them and the spheres in `infos` worked out again from its `indices`, as the fast path does.
+    struct TriangleLayout {
+        size_t vertex_count = 0;
+        int node = -1, lod = 0;
+        std::array<float, 16> transform{};
+        std::vector<u32> indices;
+        std::vector<scene::Primitive> primitives;
+    };
+    static void assemble_geometry(const std::vector<scene::Mesh>& meshes, size_t texture_count,
+                                  std::vector<scene::Vertex>& vertices, std::vector<u32>& indices,
+                                  std::vector<MeshInfo>& infos);
+    static std::vector<TriangleLayout> triangle_layout(const std::vector<scene::Mesh>& meshes);
+    static bool same_triangles(const std::vector<TriangleLayout>& last, const std::vector<scene::Mesh>& meshes);
+    static void place_vertices(const std::vector<scene::Mesh>& meshes, const std::vector<u32>& indices,
+                               std::vector<MeshInfo>& infos, std::vector<scene::Vertex>& vertices);
+
     const std::vector<MeshInfo>& meshes() const { return meshes_; }
     // The meshes of GTM1 node `node` (MeshInfo::node) as indices into meshes(), in model order
     // (DrawItem::nodes); empty when it has none.
@@ -131,6 +152,10 @@ private:
     SDL_GPUTransferBuffer* staging_ = nullptr;
     u32 staging_capacity_ = 0;
     std::vector<u32> uploaded_indices_; // update_geometry: the index buffer's contents
+    // update_geometry: the last upload's meshes but their vertices (the fast path when only those change), and
+    // the fast path's vertex array.
+    std::vector<TriangleLayout> last_;
+    std::vector<scene::Vertex> scratch_vertices_;
     bool keep_ = false;
     Geometry geometry_;
 };
