@@ -13,6 +13,7 @@
 #include <cmath>
 #include <numbers>
 #include <cstdio>
+#include <cstdlib>
 #include <memory>
 
 namespace gt3r {

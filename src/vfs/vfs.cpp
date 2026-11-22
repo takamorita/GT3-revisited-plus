@@ -7,6 +7,7 @@
 #include <SDL3/SDL_filesystem.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <memory>
 #include <set>
