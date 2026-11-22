@@ -187,6 +187,10 @@ public:
             if (ns.active()) ns.set_ready(false);
         }
         ns.poll();
+        if (creating_ && ns.is_host() && !ns.code().empty()) { // the relay server registered the session
+            creating_ = false;
+            status("Session " + net::format_code(ns.code()) + ": share the code", false);
+        }
         while (std::optional<net::Event> e = ns.next_event()) {
             using K = net::Event::Kind;
             switch (e->kind) {
@@ -914,6 +918,7 @@ private:
         announce_car();
         to_lobby(kCreate, 0);
         status("Creating the session...", false);
+        creating_ = true;
         remember(app);
     }
 
@@ -1010,6 +1015,7 @@ private:
     // What confirming the text does next (a join row's Cross: edit, then join).
     enum class After { Nothing, JoinCode, JoinAddress } after_edit_ = After::Nothing;
     bool editing_ = false;
+    bool creating_ = false; // "Creating the session..." until the relay server sends the code
     std::string edit_backup_;
     TextKeyboard keyboard_; // in VR (vr_)
     std::string& edit_target() {
