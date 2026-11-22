@@ -55,6 +55,9 @@ std::string Address::to_string() const {
     char buf[INET6_ADDRSTRLEN] = {};
     if (family() == AF_INET) {
         auto* s = reinterpret_cast<const sockaddr_in*>(storage);
+#ifdef __EMSCRIPTEN__
+        if (s->sin_addr.s_addr == 0 && s->sin_port == 0) return "the relay's WebSocket"; // (socket_web.cpp)
+#endif
         inet_ntop(AF_INET, &s->sin_addr, buf, sizeof buf);
         return std::string(buf) + ":" + std::to_string(port());
     }
