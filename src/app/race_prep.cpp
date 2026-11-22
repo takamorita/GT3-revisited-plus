@@ -1,4 +1,5 @@
 #include "app/race_prep.h"
+#include "platform/hooks.h"
 
 #include "app/race_launch_field.h"
 
@@ -54,6 +55,7 @@ template <class F> bool ready(const F& f) {
 template <class F> auto on_thread(const char* what, F job) -> std::shared_future<decltype(job())> {
     try {
         return std::async(std::launch::async, [job = std::move(job)]() -> decltype(job()) {
+                   platform::background_thread();
                    try {
                        return job();
                    } catch (...) {
@@ -230,7 +232,10 @@ std::vector<BuiltAhead> build_cars(render::GpuContext& gpu, const std::vector<Ca
     std::vector<std::thread> helpers;
     for (size_t t = 1; t < std::min<size_t>(builds.size(), 4); ++t) {
         try {
-            helpers.emplace_back(work);
+            helpers.emplace_back([&work] {
+                platform::background_thread();
+                work();
+            });
         } catch (const std::system_error&) {
             break; // (no more threads: this one and those started do the rest)
         }

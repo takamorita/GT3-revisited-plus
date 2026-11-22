@@ -24,6 +24,7 @@
 //   GT3R_GT3MENU_OPEN=gt_mode:cd/cd_usa_ford   open a page directly
 
 #include "game/gt_mode_menu.h"
+#include "platform/hooks.h"
 #include "game/replay_theater.h"
 #include "app/app.h"
 #include "app/presence.h"
@@ -365,6 +366,7 @@ private:
         // out on a thread while the menus show, so the first race's load does not do it.
         if (app.vfs() && !warm_.valid())
             warm_ = std::async(std::launch::async, [vfs = app.vfs()] {
+                platform::background_thread();
                 race::exact_program_data(*vfs);
             });
         // "mpeg" widgets show the background movie.

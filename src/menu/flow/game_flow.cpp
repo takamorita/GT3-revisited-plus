@@ -1,4 +1,5 @@
 #include "menu/flow/game_flow.h"
+#include "platform/hooks.h"
 
 #include "base/log.h"
 #include "formats/db/gt_db.h"
@@ -359,6 +360,7 @@ void GameFlow::prepare(const std::string& set, const std::string& page) {
         if (have.size() == want.size()) return;
     }
     prepare_ = std::async(std::launch::async, [reader = reader_, lang = lang_, set, page, have] {
+        platform::background_thread();
         Prepared out{set, lang, {}};
         std::vector<int> want;
         try {

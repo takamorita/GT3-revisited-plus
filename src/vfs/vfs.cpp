@@ -1,4 +1,5 @@
 #include "vfs/vfs.h"
+#include "platform/hooks.h"
 #include <chrono>
 
 #include "base/config.h"
@@ -174,6 +175,7 @@ void Vfs::prefetch(std::vector<std::string> paths) {
     auto pf = std::make_shared<Prefetch>();
     Prefetch* raw = pf.get(); // (the thread is joined before pf goes: in the next prefetch() or ~Prefetch)
     pf->thread = std::thread([this, raw, paths = std::move(paths)] {
+        platform::background_thread();
         for (const std::string& path : paths) {
             if (raw->stop) break;
             std::optional<Bytes> b;
