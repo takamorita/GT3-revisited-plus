@@ -93,7 +93,14 @@ bool Address::operator==(const Address& o) const {
     return length == 0 && o.length == 0;
 }
 
+#ifdef __EMSCRIPTEN__
+bool resolve_web_relay(const std::string& text, Address& out); // socket_web.cpp
+#endif
+
 bool resolve(const std::string& text, u16 default_port, Address& out, std::string* error) {
+#ifdef __EMSCRIPTEN__
+    if (resolve_web_relay(text, out)) return true; // a relay's WebSocket (ws://, wss://)
+#endif
     ensure_init();
     std::string host = text, port = std::to_string(default_port);
     if (!host.empty() && host[0] == '[') { // [v6]:port
@@ -134,13 +141,11 @@ bool resolve(const std::string& text, u16 default_port, Address& out, std::strin
     return out.valid();
 }
 
+// In a browser the sockets are socket_web.cpp's: no UDP there, datagrams travel over a WebSocket to
+// the relay server (tools/gt3r-relay/ws_gateway.h).
+#ifndef __EMSCRIPTEN__
+
 bool UdpSocket::setup(int family, u16 port, std::string* error) {
-#ifdef __EMSCRIPTEN__
-    // Browsers have no UDP (Emscripten would tunnel it over WebSockets to a proxy); online play on the
-    // web goes through the relay another way, so no socket opens there.
-    if (error) *error = "no UDP sockets in a browser";
-    return false;
-#endif
     close();
     ensure_init();
     Fd fd = Fd(::socket(family, SOCK_DGRAM, IPPROTO_UDP));
@@ -291,9 +296,13 @@ bool UdpSocket::wait_readable(int timeout_ms) const {
     return ::select(int(fd_) + 1, &set, nullptr, nullptr, &tv) > 0;
 }
 
+#endif // !__EMSCRIPTEN__
+
 std::vector<std::string> local_addresses() {
     std::vector<std::string> out;
-#if !defined(_WIN32)
+#if defined(__EMSCRIPTEN__)
+    return out; // (a browser has no addresses of its own to offer)
+#elif !defined(_WIN32)
     ifaddrs* list = nullptr;
     if (getifaddrs(&list) != 0) return out;
     for (ifaddrs* i = list; i; i = i->ifa_next) {

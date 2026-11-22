@@ -7,12 +7,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(GT3R_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../../src)
 add_executable(gt3r-relay
   main.cpp
+  ws_gateway.cpp
   ${GT3R_SRC}/net/socket.cpp
   ${GT3R_SRC}/net/protocol.cpp
   ${GT3R_SRC}/net/rendezvous.cpp
   ${GT3R_SRC}/net/relay_server.cpp
   ${GT3R_SRC}/net/geoip.cpp)
 target_include_directories(gt3r-relay PRIVATE ${GT3R_SRC})
+find_package(Threads REQUIRED)
+target_link_libraries(gt3r-relay PRIVATE Threads::Threads) # (the browsers' port runs on its own thread)
 if(WIN32)
   target_link_libraries(gt3r-relay PRIVATE ws2_32)
 endif()

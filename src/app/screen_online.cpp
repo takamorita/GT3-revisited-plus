@@ -933,6 +933,11 @@ private:
     void host(App& app) {
         std::string err;
         net::Session& ns = net::online();
+#ifdef __EMSCRIPTEN__
+        // A browser listens on no port of its own (its datagrams go through the relay server's WebSocket).
+        status("Cannot host by address in a browser: create a session (a code) instead", true);
+        return;
+#endif
         if (!ns.host(port_, name_, car_label(), u8(paint_), &err)) {
             status("Cannot host: " + err, true);
             return;
@@ -949,6 +954,12 @@ private:
     void join(App& app) {
         std::string err;
         net::Session& ns = net::online();
+#ifdef __EMSCRIPTEN__
+        { // the datagrams go through the relay server's WebSocket (net/socket_web.cpp): its address picks it
+            net::Address unused;
+            net::resolve(server_, 0, unused);
+        }
+#endif
         if (!ns.join(address_, name_, car_label(), u8(paint_), &err)) {
             status("Cannot join: " + err, true);
             return;

@@ -190,9 +190,11 @@ target_include_directories(${GT3R_APP_TARGET} SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}
 
 if(GT3R_BUILD_TOOLS AND NOT ANDROID AND NOT IOS)
   # The online relay server (also builds on its own: tools/gt3r-relay/CMakeLists.txt).
-  add_executable(gt3r-relay tools/gt3r-relay/main.cpp src/net/socket.cpp src/net/protocol.cpp
+  add_executable(gt3r-relay tools/gt3r-relay/main.cpp tools/gt3r-relay/ws_gateway.cpp src/net/socket.cpp src/net/protocol.cpp
                  src/net/rendezvous.cpp src/net/relay_server.cpp src/net/geoip.cpp)
   target_include_directories(gt3r-relay PRIVATE src)
+  find_package(Threads REQUIRED)
+  target_link_libraries(gt3r-relay PRIVATE Threads::Threads)
   if(WIN32)
     target_link_libraries(gt3r-relay PRIVATE ws2_32)
   endif()

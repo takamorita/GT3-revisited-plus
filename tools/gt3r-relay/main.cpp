@@ -40,9 +40,16 @@
 //                            DB-IP's IP to Country Lite (tools/gt3r-relay/update-geoip.sh fetches
 //                            it); re-read on SIGHUP. Missing: "??" until a reload finds it.
 // Nothing else is kept. Version queries are only counted (in the stats line), never logged.
+// Browsers (the browser build has no UDP; ws_gateway.h):
+//   --ws-port 47752          a WebSocket port for browsers, each one an ordinary UDP peer here
+//                            (ws://; put a TLS proxy in front for wss://, which https pages need)
+//   --ws-relay HOST:PORT     this relay's address as players reach it (default: this machine's
+//                            first LAN address and --port)
+//   --ws-allow-lan           browsers may also send to private IPv4 addresses (LAN play)
 
 #include "net/geoip.h"
 #include "net/relay_server.h"
+#include "ws_gateway.h"
 
 #include <algorithm>
 #include <csignal>
@@ -100,8 +107,9 @@ bool load_versions(const std::string& path, gt3r::net::RelayServer::Versions& v,
 } // namespace
 
 int main(int argc, char** argv) {
-    unsigned port = gt3r::net::kDefaultRelayPort;
-    bool quiet = false, log_ips = false;
+    unsigned port = gt3r::net::kDefaultRelayPort, ws_port = 0;
+    bool quiet = false, log_ips = false, ws_allow_lan = false;
+    std::string ws_relay;
     double buffers_kb = 4096; // kernel socket buffers asked for (a burst of 60 Hz traffic)
     gt3r::net::RelayServer::Limits lim;
     struct Flag {
@@ -147,6 +155,9 @@ int main(int argc, char** argv) {
         if (known) continue;
         if (bad_value) break;
         if (!std::strcmp(argv[i], "--port") && i + 1 < argc) port = unsigned(std::atoi(argv[++i])), known = true;
+        else if (!std::strcmp(argv[i], "--ws-port") && i + 1 < argc) ws_port = unsigned(std::atoi(argv[++i])), known = true;
+        else if (!std::strcmp(argv[i], "--ws-relay") && i + 1 < argc) ws_relay = argv[++i], known = true;
+        else if (!std::strcmp(argv[i], "--ws-allow-lan")) ws_allow_lan = true, known = true;
         else if (!std::strcmp(argv[i], "--quiet")) quiet = true, known = true;
         else if (!std::strcmp(argv[i], "--log-ips")) log_ips = true, known = true;
         else if (!std::strcmp(argv[i], "--bench")) lim.bench = true, known = true;
@@ -166,6 +177,7 @@ int main(int argc, char** argv) {
                          "  limits:     [--max-sessions 4000] [--sessions-per-ip 8] [--max-channels 20000] [--max-pending 8192]\n"
                          "              [--ip-rate 10] [--ip-burst 40] [--misses-per-min 10] [--misses-per-s 200]\n"
                          "  socket:     [--buffers-kb 4096]\n"
+                         "  browsers:   [--ws-port 47752] [--ws-relay HOST:PORT] [--ws-allow-lan]\n"
                          "  versions:   [--latest x.y.z] [--min-online x.y.z] [--release-url URL] [--versions-file PATH]\n"
                          "              (URL may hold {asset}: .../releases/latest/download/{asset})\n"
                          "  (values > 0; --log-ips logs players' IPs instead of daily tags; --bench lets loopback\n"
@@ -222,6 +234,26 @@ int main(int argc, char** argv) {
                  : "logging players as tags (a keyed hash of the IP, new key each UTC day), not IP addresses");
     load_geo();
     line(describe(srv.versions()));
+    gt3r::net::WsGateway ws;
+    if (ws_port) {
+#ifdef SIGPIPE
+        std::signal(SIGPIPE, SIG_IGN); // (a browser that went away mid-write)
+#endif
+        gt3r::net::WsGateway::Options wo;
+        wo.port = gt3r::u16(ws_port);
+        wo.allow_lan = ws_allow_lan;
+        wo.log_ips = log_ips;
+        if (ws_relay.empty()) { // the relay as the other players reach it: not loopback, or they would be sent there
+            std::vector<std::string> lan = gt3r::net::local_addresses();
+            ws_relay = (lan.empty() ? std::string("127.0.0.1") : lan[0]) + ":" + std::to_string(srv.port());
+        }
+        if (!gt3r::net::resolve(ws_relay, gt3r::u16(srv.port()), wo.relay, &err) || !ws.start(wo, line, &err)) {
+            std::fprintf(stderr, "gt3r-relay: browsers' port: %s\n", err.c_str());
+            return 1;
+        }
+        line("browsers: WebSocket on TCP " + std::to_string(ws_port) + ", sending to the relay at " + wo.relay.to_string() +
+             (ws_allow_lan ? " and to private IPv4 addresses" : ""));
+    }
     double last_stats = gt3r::net::now_ms();
     while (!g_stop) {
         srv.step(50);
@@ -256,6 +288,14 @@ int main(int argc, char** argv) {
                           q(gt3r::net::RvPlatform::MacOS), q(gt3r::net::RvPlatform::Linux),
                           q(gt3r::net::RvPlatform::Android), (unsigned long long)s.outdated);
             line(buf);
+            if (ws_port) {
+                gt3r::net::WsGateway::Stats w = ws.stats();
+                std::snprintf(buf, sizeof buf,
+                              "browsers: %zu connected (%llu so far), %llu datagrams sent on, %llu passed back, "
+                              "%llu refused, %llu dropped",
+                              w.open, w.accepted, w.to_udp, w.to_browser, w.refused, w.dropped);
+                line(buf);
+            }
             srv.reset_peak();
         }
     }
