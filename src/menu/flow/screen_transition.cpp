@@ -38,6 +38,7 @@ void ScreenTransition::start(TransitionType type) {
     blink_ = 0;
     delay_ = type == TransitionType::DelayFadeout ? kDelayFrames : 0;
     lines_ = 0;
+    base_.reset();
     // Random start positions in [-320, 0): each row pair starts sweeping at a
     // different time. (The original uses its own generator, seeded with 100.)
     rng_ = 100;
@@ -51,6 +52,28 @@ SDL_FColor ScreenTransition::delay_fadeout_cover(int frames) {
     const int n = frames - kDelayFrames;
     return {kDelayGrey, kDelayGrey, kDelayGrey, n > 0 ? 1.0f - std::pow(0.5f, float(n)) : 0.0f};
 }
+
+SDL_FColor ScreenTransition::fadeout_cover(int frames) {
+    constexpr float g = 12 / 255.0f;
+    return {g, g, g, frames > 0 ? 1.0f - std::pow(1.0f - gs_alpha(0x0C), float(frames)) : 0.0f};
+}
+
+namespace {
+// A copy of the render target `t` (to draw the Fadeout over), or null.
+std::shared_ptr<SDL_Texture> snapshot(SDL_Renderer* r, SDL_Texture* t) {
+    SDL_Texture* s = SDL_CreateTexture(r, t->format, SDL_TEXTUREACCESS_TARGET, t->w, t->h);
+    if (!s) return nullptr;
+    SDL_BlendMode mode = SDL_BLENDMODE_BLEND;
+    SDL_GetTextureBlendMode(t, &mode);
+    SDL_SetTextureBlendMode(t, SDL_BLENDMODE_NONE);
+    SDL_SetRenderTarget(r, s);
+    SDL_RenderTexture(r, t, nullptr, nullptr);
+    SDL_SetRenderTarget(r, t);
+    SDL_SetTextureBlendMode(t, mode);
+    SDL_SetTextureBlendMode(s, SDL_BLENDMODE_NONE);
+    return std::shared_ptr<SDL_Texture>(s, SDL_DestroyTexture);
+}
+} // namespace
 
 int ScreenTransition::settle_frames(TransitionType type) {
     switch (type) {
@@ -76,12 +99,19 @@ void ScreenTransition::draw_frame(SDL_Renderer* r, const SDL_FRect& dst) {
         return;
     }
     switch (type_) {
-    case TransitionType::Fadeout:
-        // A near-black wash at alpha 0x0C (GS scale) every frame.
+    case TransitionType::Fadeout: {
+        // A near-black wash at alpha 0x0C (GS scale) every frame, drawn as the frames' sum over the
+        // first picture (fadeout_cover) so that it evens out at 12 everywhere.
+        SDL_FColor c = fadeout_cover(frame_);
+        if (!base_)
+            if (SDL_Texture* target = SDL_GetRenderTarget(r)) base_ = snapshot(r, target);
+        if (base_) SDL_RenderTexture(r, base_.get(), nullptr, &dst);
+        else c.a = gs_alpha(0x0C); // (no picture to start from: a wash a frame)
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColorFloat(r, 12 / 255.0f, 12 / 255.0f, 12 / 255.0f, gs_alpha(0x0C));
+        SDL_SetRenderDrawColorFloat(r, c.r, c.g, c.b, c.a);
         rect(0, 0, 640, 448);
         break;
+    }
     case TransitionType::DelayFadeout:
         // Colour (0.1, 0.1, 0.1) at alpha 0.5 every frame.
         SDL_SetRenderDrawBlendMode(r, SDL_BLENDMODE_BLEND);
