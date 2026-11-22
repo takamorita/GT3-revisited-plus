@@ -14,9 +14,18 @@ namespace gt3r::race_screen {
 // (optional) is played back instead of driving.
 void RaceScreen::start(App& app, const Replay* replay) {
     error_.clear();
+    // The car files this load reads, kept for its other reads of them (read_car): let go when it ends.
+    car_files_.clear();
+    keep_car_files_ = true;
     // The engine banks: those the race's cars still play kept (restarts and the next start share them), the others read
     // again (a mod's edited bank too).
     std::erase_if(engine_banks_, [](const auto& b) { return b.second.use_count() == 1; });
+    struct LetGo {
+        RaceScreen& s;
+        ~LetGo() {
+            s.car_files_.clear(), s.keep_car_files_ = false;
+        }
+    } let_go{*this};
     reset_session_best(); // a new visit: the runs and retries that follow share it
     qm_items_ = {};       // ... and its quick menus' item switches (menus §11)
     practice_best_.clear(), practice_grid_.clear(), practice_entry_best_.clear(); // ... and its free practices' times and grid
@@ -92,7 +101,7 @@ void RaceScreen::start(App& app, const Replay* replay) {
         // ... and its fitted wheels (issue 347: the theater's launch has no garage car, so its stock rims were drawn).
         if (replay && !replay->wheel.empty()) launch_.request.car_wheel = replay->wheel;
         std::string model = launch_model_.empty() ? ca.model : launch_model_;
-        std::optional<Bytes> car_file = read_car(app, model);
+        std::shared_ptr<const Bytes> car_file = read_car(app, model);
         if (!car_file || car_file->empty()) throw FormatError("car model cars/day/" + model + " is missing or empty");
         part("read");
 
@@ -712,7 +721,7 @@ bool RaceScreen::build_vehicle(App& app) {
                 (car2 != car_.label || paint2 != preset_.paint || !model2.empty() || !wheel2.empty())) {
                 if (const data::Car* c2 = db_.car(car2)) {
                     std::string m2 = model2.empty() ? db_.model_of(*c2) : model2;
-                    std::optional<Bytes> f2 = read_car(app, m2);
+                    std::shared_ptr<const Bytes> f2 = read_car(app, m2);
                     WheelSpec ws2;
                     if (auto w = wheel_spec_for_car(db_, car2)) ws2 = *w;
                     CarBodyMod bm2 = body_mod_for_car(db_, car2, paint2);
@@ -829,11 +838,23 @@ void RaceScreen::load_opponent_cars(App& app, const RaceField& f) {
         LOG_INFO("Race: the demo's own car %s in paint %d", player_model.c_str(), paints[0]);
         if (paints[0] >= 0 && paints[0] != preset_.paint) { // (the car was built in paint 0 before the draw)
             preset_.paint = paints[0];
-            if (std::optional<Bytes> cf = read_car(app, player_model); cf && !cf->empty())
+            if (std::shared_ptr<const Bytes> cf = read_car(app, player_model); cf && !cf->empty())
                 build_player_visual(app, player_model, *cf);
         }
     }
     std::map<std::pair<std::string, int>, std::shared_ptr<CarVisual>> by_model;
+    std::vector<std::pair<std::string, int>> keys; // each opponent's model, in order
+    std::vector<CarBuild> builds; // (app/race_prep.h)
+    std::vector<std::pair<std::string, int>> build_keys;
+    auto take = [&](BuiltAhead& a) { // (a model built on a thread: its uploads here)
+        a.uploads.run();
+        a.visual->set_full_detail(full_car_detail_);
+        if (brake_parts_) a.visual->set_brake_parts(*brake_parts_);
+        return a.visual;
+    };
+    // The models of the last load, if they were built for this course and detail (opp_visual_cache_).
+    const std::string cache_key = course_name_ + "|" + (full_car_detail_ ? "1" : "0") + (brake_parts_ ? "1" : "0");
+    if (cache_key != opp_visual_cache_key_) opp_visual_cache_.clear(), opp_visual_cache_key_ = cache_key;
     for (int i = 0; i < f.opponents(); ++i) {
         const std::string& model = f.opponent_model(i);
         int paint = std::max(0, paints[size_t(i) + 1]);
@@ -846,26 +867,32 @@ void RaceScreen::load_opponent_cars(App& app, const RaceField& f) {
         if (base.empty())
             if (const data::CarVariant* cv = db_.variant(l)) base = cv->car;
         CarBodyMod bm = db_.mod_car(base) ? body_mod_for_car(db_, base, paint) : CarBodyMod{};
-        std::shared_ptr<CarVisual>& v = by_model[{bm.active() ? base : model, paint}];
-        if (!v) {
-            std::optional<Bytes> f = read_car(app, model);
-            WheelSpec ws;
-            if (auto w = wheel_spec_from_database(db_, model)) ws = *w;
-            std::optional<Bytes> wf = bm.wheel.empty() ? std::nullopt : app.vfs()->read("wheel/" + bm.wheel);
-            try {
-                if (f && !f->empty()) {
-                    const ShowroomFiles sh = read_showroom(app, model, wf ? bm.wheel : "");
-                    v = std::make_shared<CarVisual>(*app.gpu(), *f, model, ws, paint, wf ? ByteSpan(*wf) : ByteSpan{}, bm,
-                                                    sh.car_span(), sh.wheel_span(), sh.stand_in);
-                    v->set_full_detail(full_car_detail_);
-                    if (brake_parts_) v->set_brake_parts(*brake_parts_);
-                }
-            } catch (const std::exception& e) {
-                LOG_WARN("Race: opponent model %s: %s", model.c_str(), e.what());
-            }
-        }
-        opp_visuals_.push_back(v);
+        const std::pair<std::string, int> key{bm.active() ? base : model, paint};
+        keys.push_back(key);
+        std::shared_ptr<CarVisual>& v = by_model[key];
+        if (!v)
+            if (auto c = opp_visual_cache_.find(key); c != opp_visual_cache_.end()) v = c->second;
+        if (v || std::find(build_keys.begin(), build_keys.end(), key) != build_keys.end()) continue;
+        // A model to build: its files read here (the disc is this thread's), the model built below.
+        CarBuild b;
+        b.model = model, b.paint = paint, b.bm = bm;
+        b.car = read_car(app, model);
+        if (auto w = wheel_spec_from_database(db_, model)) b.ws = *w;
+        b.wheel = bm.wheel.empty() ? std::nullopt : app.vfs()->read("wheel/" + bm.wheel);
+        if (!b.car || b.car->empty()) continue;
+        ShowroomFiles sh = read_showroom(app, model, b.wheel ? bm.wheel : "");
+        b.showroom_car = sh.car, b.showroom_wheel = std::move(sh.wheel);
+        if (sh.stand_in) b.rim = sh.stand_in(); // (the menus' rim, read now: the build may want it, and reads nothing)
+        builds.push_back(std::move(b)), build_keys.push_back(key);
     }
+    // The models' CPU part (the car file's models, the hood profile, ...: about 100 ms a car here) on up to four threads,
+    // uploading nothing (render::DeferredUploads); then their uploads here, in order.
+    std::vector<BuiltAhead> built = build_cars(*app.gpu(), builds);
+    for (size_t k = 0; k < builds.size(); ++k)
+        if (built[k].visual) by_model[build_keys[k]] = take(built[k]);
+        else LOG_WARN("Race: opponent model %s: %s", builds[k].model.c_str(), built[k].error.c_str());
+    for (const std::pair<std::string, int>& key : keys) opp_visuals_.push_back(by_model[key]);
+    opp_visual_cache_ = by_model; // (models no longer in the field are let go)
     // Engine notes of the opponents (their base car's sound bank) and their extra sounds.
     std::vector<OpponentEngines::Car> sounds;
     for (OpponentSound& o : opp_sound_) o.extra.stop(app.audio().voices());
@@ -979,10 +1006,20 @@ void RaceScreen::reset_run_state() {
     reset_lap_events();
 }
 
-std::optional<Bytes> RaceScreen::read_car(App& app, const std::string& model) const {
+std::shared_ptr<const Bytes> RaceScreen::read_car_file(App& app, const std::string& path) const {
+    if (auto it = car_files_.find(path); it != car_files_.end()) return it->second;
+    std::shared_ptr<const Bytes> f;
+    if (!f)
+        if (std::optional<Bytes> r = app.vfs()->read(path)) f = std::make_shared<const Bytes>(std::move(*r));
+    if (keep_car_files_) car_files_[path] = f;
+    return f;
+}
+std::shared_ptr<const Bytes> RaceScreen::read_car(App& app, const std::string& model) const {
+    std::shared_ptr<const Bytes> f;
     if (car_folder_ != "cars/day/")
-        if (std::optional<Bytes> f = app.vfs()->read(car_folder_ + model); f && !f->empty()) return f;
-    return app.vfs()->read("cars/day/" + model);
+        if (f = read_car_file(app, car_folder_ + model); f && f->empty()) f.reset();
+    if (!f) f = read_car_file(app, "cars/day/" + model);
+    return f;
 }
 
 RaceScreen::ShowroomFiles RaceScreen::read_showroom(App& app, const std::string& model, const std::string& wheel) const {
@@ -991,7 +1028,7 @@ RaceScreen::ShowroomFiles RaceScreen::read_showroom(App& app, const std::string&
         return menu_rim([&app](const std::string& p) { return app.vfs()->read(p); }, model, wheel);
     };
     if (!showroom_wheels_) return s;
-    s.car = app.vfs()->read("menu/cars/" + model);
+    s.car = read_car_file(app, "menu/cars/" + model);
     if (s.car && !wheel.empty()) s.wheel = app.vfs()->read("menu/wheel/" + wheel);
     return s;
 }
@@ -999,7 +1036,7 @@ RaceScreen::ShowroomFiles RaceScreen::read_showroom(App& app, const std::string&
 std::vector<sim::exact::SparkPoint> RaceScreen::car_spark_points(App& app, const std::string& model) const {
     const auto [it, made] = spark_points_.try_emplace(car_folder_ + model);
     if (!made) return it->second;
-    std::optional<Bytes> f = read_car(app, model);
+    std::shared_ptr<const Bytes> f = read_car(app, model);
     if (!f || !CarFile::is_car(*f)) return {};
     for (const std::array<u32, 3>& p : gt3r::car_spark_points(CarFile::parse(*f).info))
         it->second.push_back({sim::exact::F::raw(p[0]), sim::exact::F::raw(p[1]), sim::exact::F::raw(p[2])});
