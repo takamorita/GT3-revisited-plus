@@ -135,6 +135,12 @@ bool resolve(const std::string& text, u16 default_port, Address& out, std::strin
 }
 
 bool UdpSocket::setup(int family, u16 port, std::string* error) {
+#ifdef __EMSCRIPTEN__
+    // Browsers have no UDP (Emscripten would tunnel it over WebSockets to a proxy); online play on the
+    // web goes through the relay another way, so no socket opens there.
+    if (error) *error = "no UDP sockets in a browser";
+    return false;
+#endif
     close();
     ensure_init();
     Fd fd = Fd(::socket(family, SOCK_DGRAM, IPPROTO_UDP));

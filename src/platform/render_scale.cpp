@@ -38,9 +38,21 @@ float dynamic_ceiling(int pixel_w, int pixel_h) {
     return std::clamp(float(kDynamicMaxLines) / lines, 0.5f, 1.0f);
 }
 
-int default_msaa(bool mobile) { return mobile ? 2 : 4; }
+int default_msaa(bool mobile) {
+#if defined(__EMSCRIPTEN__)
+    // WebGL resolves through the browser's own layer (ANGLE on Windows) and the computers that
+    // play in a browser are often laptops with the GPU in the processor: 2x to start with.
+    mobile = true;
+#endif
+    return mobile ? 2 : 4;
+}
 
 bool dynamic_resolution_default() {
+#if defined(__EMSCRIPTEN__)
+    // The page is often on an integrated GPU at a high display scale (1600x900 for a 1280x720 canvas at 125%),
+    // where a race with a few cars misses 60 fps at full resolution.
+    return true;
+#endif
     return is_mobile();
 }
 

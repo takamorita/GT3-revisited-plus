@@ -186,6 +186,7 @@ bool present_picker(SDL_Window* window, id types, std::function<void(std::string
 } // namespace
 #endif
 
+#if !defined(__EMSCRIPTEN__) // (the browser's: platform/web/app_hooks_web.cpp)
 bool show_document_picker(SDL_Window* window, const SDL_DialogFileFilter* filters, int count,
                           std::function<void(std::string path)> done) {
 #if defined(SDL_PLATFORM_IOS)
@@ -195,6 +196,7 @@ bool show_document_picker(SDL_Window* window, const SDL_DialogFileFilter* filter
     return false;
 #endif
 }
+#endif
 
 bool show_folder_picker(SDL_Window* window, std::function<void(std::string path)> done) {
 #if defined(SDL_PLATFORM_IOS)

@@ -23,6 +23,9 @@ if(IOS)
   set(GT3R_LIBTOOL_QUIET -no_warning_for_no_symbols)
 endif()
 
+if(EMSCRIPTEN)
+  include(cmake/Emscripten.cmake)
+endif()
 include(cmake/Dependencies.cmake)
 
 if(MSVC)
