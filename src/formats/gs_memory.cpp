@@ -1,6 +1,7 @@
 #include "formats/gs_memory.h"
 
 #include <algorithm>
+#include <cstring>
 
 namespace gt3r {
 
@@ -29,13 +30,14 @@ constexpr u8 kColumnWords[2][8] = {
 // a block is 4 columns; each column is 16 words arranged as kColumnWords.
 // 8/4-bit formats interleave rows inside each column and swap the two
 // 4-word halves on alternating row pairs (odd columns invert the swap).
+// Built at compile time: a function-local static here cost a guarded load per texel.
 struct Tables {
-    u16 col32[8][8];  // word index within block
-    u16 col16[8][16]; // halfword index within block
-    u16 col8[16][16]; // byte index within block
-    u16 col4[16][32]; // nibble index within block
+    u16 col32[8][8] = {};  // word index within block
+    u16 col16[8][16] = {}; // halfword index within block
+    u16 col8[16][16] = {}; // byte index within block
+    u16 col4[16][32] = {}; // nibble index within block
 
-    Tables() {
+    constexpr Tables() {
         for (u32 y = 0; y < 8; ++y)
             for (u32 x = 0; x < 8; ++x) col32[y][x] = u16((y >> 1) * 16 + kColumnWords[y & 1][x]);
         for (u32 y = 0; y < 8; ++y)
@@ -56,30 +58,63 @@ struct Tables {
     }
 };
 
-const Tables& tables() {
-    static const Tables t;
-    return t;
-}
+constexpr Tables kTables{};
 
 constexpr u32 kBlockMask = 0x3FFF; // 16384 blocks of 256 bytes
 
-// Address functions return an offset in units of the format's pixel size.
-u32 addr32(u32 bp, u32 bw, u32 x, u32 y) {
+// Address functions return an offset in units of the format's pixel size; `>> 6` (32-bit), `>> 7`
+// (16-bit), `>> 8` (8-bit) and `>> 9` (4-bit) of it is the block.
+inline u32 addr32(u32 bp, u32 bw, u32 x, u32 y) {
     u32 block = (bp + (y & ~31u) * bw + ((x & ~63u) >> 1) + kBlock32[(y >> 3) & 3][(x >> 3) & 7]) & kBlockMask;
-    return (block << 6) + tables().col32[y & 7][x & 7];
+    return (block << 6) + kTables.col32[y & 7][x & 7];
 }
-u32 addr16(u32 bp, u32 bw, u32 x, u32 y) {
+inline u32 addr16(u32 bp, u32 bw, u32 x, u32 y) {
     u32 block = (bp + (((y & ~63u) * bw) >> 1) + ((x & ~63u) >> 1) + kBlock16[(y >> 3) & 7][(x >> 4) & 3]) & kBlockMask;
-    return (block << 7) + tables().col16[y & 7][x & 15];
+    return (block << 7) + kTables.col16[y & 7][x & 15];
 }
-u32 addr8(u32 bp, u32 bw, u32 x, u32 y) {
+inline u32 addr8(u32 bp, u32 bw, u32 x, u32 y) {
     u32 block = (bp + (((y & ~63u) * bw) >> 2) + ((x & ~127u) >> 2) + kBlock32[(y >> 4) & 3][(x >> 4) & 7]) & kBlockMask;
-    return (block << 8) + tables().col8[y & 15][x & 15];
+    return (block << 8) + kTables.col8[y & 15][x & 15];
 }
-u32 addr4(u32 bp, u32 bw, u32 x, u32 y) {
+inline u32 addr4(u32 bp, u32 bw, u32 x, u32 y) {
     u32 block = (bp + (((y & ~127u) * bw) >> 3) + ((x & ~127u) >> 2) + kBlock16[(y >> 4) & 7][(x >> 5) & 3]) & kBlockMask;
-    return (block << 9) + tables().col4[y & 15][x & 31];
+    return (block << 9) + kTables.col4[y & 15][x & 31];
 }
+
+// Reads from memory whose untouched blocks are zeros (GsMemory: written[] marks the others).
+struct Reader {
+    const u8* m;
+    const u8* written;
+    u32 w32(u32 a) const {
+        if (!written[a >> 6]) return 0;
+        u32 v;
+        std::memcpy(&v, m + size_t(a) * 4, 4);
+        return v;
+    }
+    u32 w16(u32 a) const {
+        if (!written[a >> 7]) return 0;
+        u16 v;
+        std::memcpy(&v, m + size_t(a) * 2, 2);
+        return v;
+    }
+    u32 w8(u32 a) const { return written[a >> 8] ? m[a] : 0; }
+    u32 w4(u32 a) const { return written[a >> 9] ? (m[a >> 1] >> ((a & 1) * 4)) & 0xF : 0; }
+
+    u32 texel(u32 bp, u32 bw, u32 psm, u32 x, u32 y) const {
+        switch (psm) {
+        case 0x00:
+        case 0x01: return w32(addr32(bp, bw, x, y));
+        case 0x02:
+        case 0x0A: return w16(addr16(bp, bw, x, y));
+        case 0x13: return w8(addr8(bp, bw, x, y));
+        case 0x14: return w4(addr4(bp, bw, x, y));
+        case 0x1B: return w32(addr32(bp, bw, x, y)) >> 24;
+        case 0x24: return (w32(addr32(bp, bw, x, y)) >> 24) & 0xF;
+        case 0x2C: return w32(addr32(bp, bw, x, y)) >> 28;
+        default: return 0;
+        }
+    }
+};
 
 u32 expand_alpha(u32 a) { return std::min<u32>(a * 2, 255); }
 
@@ -92,6 +127,14 @@ u32 ct16_to_rgba(u32 c) {
     // known, so treat the A bit as a straight on/off mask.
     u32 a = (c & 0x8000) ? 0xFF : 0x00;
     return r | (g << 8) | (b << 16) | (a << 24);
+}
+
+// Every texel of a w*h rect through `fn(x, y, i)`, i = the texel's index in row order. The callers pick
+// the format once, outside the loop (a switch per texel was most of the time of loading a menu).
+template <class Fn> void each_texel(u32 w, u32 h, Fn fn) {
+    size_t i = 0;
+    for (u32 y = 0; y < h; ++y)
+        for (u32 x = 0; x < w; ++x, ++i) fn(x, y, i);
 }
 
 } // namespace
@@ -151,51 +194,84 @@ Clamp Clamp::decode(u64 v) {
     return c;
 }
 
-GsMemory::GsMemory() : mem_(kBytes, 0) {}
+// The memory starts as zeros. Most texture sets write a few of its 16384 blocks, and a GsMemory is made
+// for each one (hundreds when a menu or a race loads), so instead of clearing 4 MiB each time a block is
+// cleared the first time a transfer writes to it, and a block never written reads as zeros.
+GsMemory::GsMemory() : mem_(new u8[kBytes]), written_(new u8[kBlocks]()) {}
 
 void GsMemory::upload(u32 dbp, u32 dbw, u32 dpsm, u32 w, u32 h, ByteSpan src) {
     u32 bits = psm_bits(dpsm);
     if (bits == 0) throw FormatError("unsupported upload PSM");
     if (u64(w) * h * bits / 8 > src.size()) throw FormatError("texture upload larger than source data");
-    u8* m = mem_.data();
-    size_t i = 0; // pixel index
-    for (u32 y = 0; y < h; ++y) {
-        for (u32 x = 0; x < w; ++x, ++i) {
-            switch (dpsm) {
-            case 0x00: std::memcpy(m + addr32(dbp, dbw, x, y) * 4, &src[i * 4], 4); break;
-            case 0x01: std::memcpy(m + addr32(dbp, dbw, x, y) * 4, &src[i * 3], 3); break;
-            case 0x02:
-            case 0x0A: std::memcpy(m + addr16(dbp, dbw, x, y) * 2, &src[i * 2], 2); break;
-            case 0x13: m[addr8(dbp, dbw, x, y)] = src[i]; break;
-            case 0x14: {
-                u32 nib = (src[i >> 1] >> ((i & 1) * 4)) & 0xF;
-                u32 a = addr4(dbp, dbw, x, y);
-                u8& b = m[a >> 1];
-                b = (a & 1) ? u8((b & 0x0F) | (nib << 4)) : u8((b & 0xF0) | nib);
-                break;
-            }
-            }
+    u8* m = mem_.get();
+    u8* written = written_.get();
+    const u8* s = src.data();
+    auto touch = [m, written](u32 block) {
+        if (!written[block]) {
+            std::memset(m + size_t(block) * 256, 0, 256);
+            written[block] = 1;
         }
+    };
+    switch (dpsm) {
+    case 0x00:
+        each_texel(w, h, [&](u32 x, u32 y, size_t i) {
+            u32 a = addr32(dbp, dbw, x, y);
+            touch(a >> 6);
+            std::memcpy(m + size_t(a) * 4, s + i * 4, 4);
+        });
+        break;
+    case 0x01:
+        each_texel(w, h, [&](u32 x, u32 y, size_t i) {
+            u32 a = addr32(dbp, dbw, x, y);
+            touch(a >> 6);
+            std::memcpy(m + size_t(a) * 4, s + i * 3, 3);
+        });
+        break;
+    case 0x02:
+    case 0x0A:
+        each_texel(w, h, [&](u32 x, u32 y, size_t i) {
+            u32 a = addr16(dbp, dbw, x, y);
+            touch(a >> 7);
+            std::memcpy(m + size_t(a) * 2, s + i * 2, 2);
+        });
+        break;
+    case 0x13:
+        each_texel(w, h, [&](u32 x, u32 y, size_t i) {
+            u32 a = addr8(dbp, dbw, x, y);
+            touch(a >> 8);
+            m[a] = s[i];
+        });
+        break;
+    case 0x14:
+        each_texel(w, h, [&](u32 x, u32 y, size_t i) {
+            u32 nib = (s[i >> 1] >> ((i & 1) * 4)) & 0xF;
+            u32 a = addr4(dbp, dbw, x, y);
+            touch(a >> 9);
+            u8& b = m[a >> 1];
+            b = (a & 1) ? u8((b & 0x0F) | (nib << 4)) : u8((b & 0xF0) | nib);
+        });
+        break;
     }
 }
 
 u32 GsMemory::read_texel(u32 bp, u32 bw, u32 psm, u32 x, u32 y) const {
-    const u8* m = mem_.data();
-    u32 v = 0;
+    return Reader{mem_.get(), written_.get()}.texel(bp, bw, psm, x, y);
+}
+
+void GsMemory::read_texels(u32 bp, u32 bw, u32 psm, u32 x0, u32 y0, u32 w, u32 h, u32* out) const {
+    const Reader r{mem_.get(), written_.get()};
+    auto fill = [&](auto texel) { each_texel(w, h, [&](u32 x, u32 y, size_t i) { out[i] = texel(x0 + x, y0 + y); }); };
     switch (psm) {
     case 0x00:
-    case 0x01: std::memcpy(&v, m + addr32(bp, bw, x, y) * 4, 4); return v;
+    case 0x01: fill([&](u32 x, u32 y) { return r.w32(addr32(bp, bw, x, y)); }); break;
     case 0x02:
-    case 0x0A: std::memcpy(&v, m + addr16(bp, bw, x, y) * 2, 2); return v;
-    case 0x13: return m[addr8(bp, bw, x, y)];
-    case 0x14: {
-        u32 a = addr4(bp, bw, x, y);
-        return (m[a >> 1] >> ((a & 1) * 4)) & 0xF;
-    }
-    case 0x1B: std::memcpy(&v, m + addr32(bp, bw, x, y) * 4, 4); return v >> 24;
-    case 0x24: std::memcpy(&v, m + addr32(bp, bw, x, y) * 4, 4); return (v >> 24) & 0xF;
-    case 0x2C: std::memcpy(&v, m + addr32(bp, bw, x, y) * 4, 4); return v >> 28;
-    default: return 0;
+    case 0x0A: fill([&](u32 x, u32 y) { return r.w16(addr16(bp, bw, x, y)); }); break;
+    case 0x13: fill([&](u32 x, u32 y) { return r.w8(addr8(bp, bw, x, y)); }); break;
+    case 0x14: fill([&](u32 x, u32 y) { return r.w4(addr4(bp, bw, x, y)); }); break;
+    case 0x1B: fill([&](u32 x, u32 y) { return r.w32(addr32(bp, bw, x, y)) >> 24; }); break;
+    case 0x24: fill([&](u32 x, u32 y) { return (r.w32(addr32(bp, bw, x, y)) >> 24) & 0xF; }); break;
+    case 0x2C: fill([&](u32 x, u32 y) { return r.w32(addr32(bp, bw, x, y)) >> 28; }); break;
+    default: std::fill(out, out + size_t(w) * h, 0u); break;
     }
 }
 
@@ -218,25 +294,36 @@ u32 GsMemory::clut_color(const Tex0& t, u32 index) const {
 
 std::vector<u32> GsMemory::decode_rgba(const Tex0& t, u32 width, u32 height, u32 x0, u32 y0) const {
     std::vector<u32> out(size_t(width) * height);
+    const Reader r{mem_.get(), written_.get()};
+    const u32 opaque = t.tcc ? 0 : 0xFF000000u;
+    const u32 bp = t.tbp, bw = t.tbw;
+    u32* o = out.data();
+    // `texel(x, y)` reads one texel of the format; `color(v)` turns it into RGBA. Both are chosen here,
+    // once, so the loop has neither switch inside.
+    auto fill = [&](auto texel, auto color) {
+        each_texel(width, height, [&](u32 x, u32 y, size_t i) { o[i] = color(texel(x0 + x, y0 + y)) | opaque; });
+    };
     bool indexed = t.psm == 0x13 || t.psm == 0x14 || t.psm == 0x1B || t.psm == 0x24 || t.psm == 0x2C;
-    u32 palette[256];
     if (indexed) {
+        u32 palette[256];
         u32 n = (t.psm == 0x13 || t.psm == 0x1B) ? 256 : 16;
         for (u32 i = 0; i < n; ++i) palette[i] = clut_color(t, i);
-    }
-    for (u32 y = 0; y < height; ++y) {
-        for (u32 x = 0; x < width; ++x) {
-            u32 v = read_texel(t.tbp, t.tbw, t.psm, x0 + x, y0 + y);
-            u32 c;
-            if (indexed)
-                c = palette[v & 0xFF];
-            else if (t.psm == 0x02 || t.psm == 0x0A)
-                c = ct16_to_rgba(v);
-            else
-                c = ct32_to_rgba(t.psm == 0x01 ? (v | 0x80000000u) : v);
-            if (!t.tcc) c |= 0xFF000000u;
-            out[size_t(y) * width + x] = c;
+        auto pal = [&palette](u32 v) { return palette[v & 0xFF]; };
+        switch (t.psm) {
+        case 0x13: fill([&](u32 x, u32 y) { return r.w8(addr8(bp, bw, x, y)); }, pal); break;
+        case 0x14: fill([&](u32 x, u32 y) { return r.w4(addr4(bp, bw, x, y)); }, pal); break;
+        case 0x1B: fill([&](u32 x, u32 y) { return r.w32(addr32(bp, bw, x, y)) >> 24; }, pal); break;
+        case 0x24: fill([&](u32 x, u32 y) { return (r.w32(addr32(bp, bw, x, y)) >> 24) & 0xF; }, pal); break;
+        case 0x2C: fill([&](u32 x, u32 y) { return r.w32(addr32(bp, bw, x, y)) >> 28; }, pal); break;
         }
+    } else if (t.psm == 0x02 || t.psm == 0x0A) {
+        fill([&](u32 x, u32 y) { return r.w16(addr16(bp, bw, x, y)); }, [](u32 v) { return ct16_to_rgba(v); });
+    } else if (t.psm == 0x00) {
+        fill([&](u32 x, u32 y) { return r.w32(addr32(bp, bw, x, y)); }, [](u32 v) { return ct32_to_rgba(v); });
+    } else if (t.psm == 0x01) {
+        fill([&](u32 x, u32 y) { return r.w32(addr32(bp, bw, x, y)); }, [](u32 v) { return ct32_to_rgba(v | 0x80000000u); });
+    } else { // a format with no layout here reads as zeros, as read_texel does
+        std::fill(out.begin(), out.end(), ct32_to_rgba(0) | opaque);
     }
     return out;
 }
