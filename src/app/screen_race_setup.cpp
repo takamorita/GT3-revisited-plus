@@ -3,6 +3,7 @@
 // again from its start; warp, the TV cameras, the saved ghosts.
 // (Race screen code map: docs/dev/RACE.md.)
 
+#include "app/race_launch_field.h"
 #include "app/screen_race_impl.h"
 
 #include "sim/exact/race_flow.h"
@@ -636,8 +637,7 @@ bool RaceScreen::build_vehicle(App& app) {
             music_start_type_ = es.type;
             // Demo races (start type 0 with a speed): every car starts moving, no countdown.
             demo_start_kmh_ = es.type == 0 && es.initial_kmh > 0 ? es.initial_kmh : 0.0f;
-            if (es.cars > 1) cfg.max_opponents = std::min(es.cars - 1, 5);
-            if (!race_opponent_paints_.empty()) cfg.max_opponents = 5; // (a custom race: its own field, not the event's)
+            cfg.max_opponents = launch_max_opponents(sev, !race_opponent_paints_.empty());
             if (es.laps == 0 && es.time_limit_s > 0) time_limit_ = es.time_limit_s;
             rolling_ = es.rolling();
             LOG_INFO("Race: event %s start type %d (%s), countdown %.0f s, %d cars, %d laps, time limit %.0f min",
@@ -803,15 +803,10 @@ void RaceScreen::load_opponent_cars(App& app, const RaceField& f) {
     entries.push_back({player_model, draw_player_paint_ ? 0xFFFFFFFFu : colors_.id_at(player_model, preset_.paint)});
     const data::Event* pev = db_.event(race_event_);
     for (int i = 0; i < f.opponents(); ++i) {
-        PaintEntry e{f.opponent_model(i)};
-        if (pev && race_opponents_ == pev->entries) // the event's own field: slot i is pool entry i
-            e.id = race::pool_color_id(*pev, i);
-        if (size_t(i) < race_opponent_color_ids_.size()) e.id = race_opponent_color_ids_[size_t(i)];
-        if (online_ && size_t(i) < net_.paint.size()) // the colour that player chose
-            e.id = colors_.id_at(f.opponent_model(i), net_.paint[size_t(i)]);
-        if (size_t(i) < race_opponent_paints_.size() && race_opponent_paints_[size_t(i)] >= 0) // the colour the grid gives it
-            e.id = colors_.id_at(f.opponent_model(i), race_opponent_paints_[size_t(i)]);
-        entries.push_back(e);
+        static const std::vector<int> kNone;
+        entries.push_back(opponent_paint_entry(colors_, f.opponent_model(i), size_t(i), race_opponents_, pev,
+                                               race_opponent_color_ids_, online_ ? net_.paint : kNone,
+                                               race_opponent_paints_));
     }
     // The race module's generator, as left by the opponent draw; a replay re-runs
     // the draw from the state its race had. The race's other runs keep the paints drawn for it.
