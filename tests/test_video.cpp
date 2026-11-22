@@ -1323,3 +1323,128 @@ TEST(video_disc_course_ipic) {
     }
     CHECK(ok == 42);
 }
+
+namespace {
+// The height of the player's texture (a deinterlaced picture is two pictures stacked: twice the movie's).
+float texture_height(const MoviePlayer& player) {
+    float h = 0;
+    if (player.texture()) SDL_GetTextureSize(player.texture(), nullptr, &h);
+    return h;
+}
+} // namespace
+
+// A looping movie keeps its field layout across the loop: the next pass starts with what the pass before decided, and
+// no picture is drawn whole (the texture's full height: both fields, or both deinterlaced pictures, stacked). begin() used to start the vote over at each loop, and the last
+// picture of the pass before, still in the texture, was drawn by the "not voted yet" layout (a menu background
+// flashed a squashed double picture once a loop).
+TEST(video_player_loop_keeps_field_layout) {
+    const Bytes s = timed_movie(4, 30000.0 / 1001.0, 20); // decided (16 votes) within the first pass
+    SDL_Surface* surface = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA32);
+    SDL_Renderer* r = surface ? SDL_CreateSoftwareRenderer(surface) : nullptr;
+    CHECK(r != nullptr);
+    if (!r) {
+        SDL_DestroySurface(surface);
+        return;
+    }
+    u64 now = 1'000'000'000;
+    int split_refreshes = 0, whole_after_split = 0, drawn_whole = 0;
+    {
+        MoviePlayer player;
+        player.set_time_source([&now] { return now; });
+        player.start_loop([&s] { return std::make_unique<Movie>(buffer_reader(s), s.size()); }, 0.0f);
+        const SDL_FRect display{0, 0, 64, 64};
+        SDL_FRect src, dst;
+        for (int k = 0; k < 120; ++k) { // 2 s at 60 Hz: about three passes of the 20-picture movie
+            now = 1'000'000'000 + u64(std::llround((0.0008 + k / 60.0) * 1e9));
+            player.wait_for_frame(2.0);
+            player.update(r);
+            if (player.field_split()) ++split_refreshes;
+            else if (split_refreshes > 0) ++whole_after_split;
+            player.picture_rects(display, src, dst);
+            if (src.h > 0.75f * texture_height(player)) ++drawn_whole; // (one field: half of it)
+        }
+    }
+    SDL_DestroyRenderer(r);
+    SDL_DestroySurface(surface);
+    CHECK(split_refreshes > 100);
+    CHECK(whole_after_split == 0);
+    CHECK(drawn_whole == 0);
+}
+
+namespace {
+// A movie of `frames` flat grey pictures (one I picture, then zero-vector P pictures): flat rows give no seam ratio, so
+// the layout vote never counts one of them and the player's layout stays as it starts.
+Bytes flat_movie(int frames) {
+    Bytes s;
+    for (int k = 0; k < frames; ++k) {
+        Bytes v;
+        if (k == 0) {
+            append(v, sequence_prefix(4));
+            BitWriter w;
+            put_picture_header(w, 0, 1);
+            for (int row = 0; row < kMbH; ++row) {
+                put_slice_header(w, row);
+                int pred[3] = {128, 128, 128};
+                for (int mx = 0; mx < kMbW; ++mx) {
+                    w.str("1");
+                    put_intra_mb(w, 100, 128, 128, pred);
+                }
+            }
+            w.align();
+            append(v, w.b);
+        } else {
+            append(v, build_p_picture(k));
+        }
+        if (k == frames - 1) append(v, sequence_end());
+        append(s, pack_header());
+        append(s, pes_packet(0xE0, v, 90000 + s64(std::llround(k * 90000.0 * 1001.0 / 30000.0))));
+    }
+    append(s, Bytes{0, 0, 1, 0xB9});
+    return s;
+}
+} // namespace
+
+// Another movie started (the course select's next course): until its first picture is in the texture, the picture
+// there is the last one of the movie before, and it is drawn by that movie's layout. The vote of the new movie
+// starting over used to make the player draw that field-split picture whole (both fields stacked) for a frame.
+TEST(video_player_switch_keeps_the_shown_pictures_layout) {
+    const Bytes a = timed_movie(4, 30000.0 / 1001.0, 6);
+    const Bytes b = flat_movie(6); // its layout is never voted: the player's own stays "whole"
+    SDL_Surface* surface = SDL_CreateSurface(64, 64, SDL_PIXELFORMAT_RGBA32);
+    SDL_Renderer* r = surface ? SDL_CreateSoftwareRenderer(surface) : nullptr;
+    CHECK(r != nullptr);
+    if (!r) {
+        SDL_DestroySurface(surface);
+        return;
+    }
+    u64 now = 1'000'000'000;
+    bool split_before = false, half_after = false, whole_once_shown = false;
+    {
+        MoviePlayer player;
+        player.set_time_source([&now] { return now; });
+        player.start(std::make_unique<Movie>(buffer_reader(a), a.size()), 0.0f);
+        for (int k = 0; k < 6; ++k) {
+            now = 1'000'000'000 + u64(std::llround((0.0008 + k / 60.0) * 1e9));
+            player.wait_for_frame(2.0);
+            player.update(r);
+        }
+        split_before = player.field_split();
+        player.start(std::make_unique<Movie>(buffer_reader(b), b.size()), 0.0f); // nothing of it shown yet
+        const SDL_FRect display{0, 0, 64, 64};
+        SDL_FRect src, dst;
+        player.picture_rects(display, src, dst);
+        // (src is in the texture's pixels: one field, or one deinterlaced picture, is half of its height)
+        half_after = src.h < 0.75f * texture_height(player); // one field of the picture still shown, not the whole texture
+        // Once its own picture is shown, the flat movie draws whole.
+        now += 1'000'000'000;
+        player.wait_for_frame(2.0);
+        player.update(r);
+        player.picture_rects(display, src, dst);
+        whole_once_shown = src.h > 0.75f * texture_height(player);
+    }
+    SDL_DestroyRenderer(r);
+    SDL_DestroySurface(surface);
+    CHECK(split_before);
+    CHECK(half_after);
+    CHECK(whole_once_shown);
+}
