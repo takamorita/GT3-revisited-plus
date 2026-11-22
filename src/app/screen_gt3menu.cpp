@@ -33,6 +33,7 @@
 #include "app/screen_registry.h"
 #include "base/log.h"
 #include "menu/flow/game_flow.h"
+#include "app/race_prep.h"
 #include "race/exact_setup.h"
 #include "menu/flow/gt_mode_hooks.h"
 #include "menu/flow/menu_sound.h"
@@ -550,6 +551,21 @@ private:
             else if (p->track < 0) app.audio().bgm().stop(app.audio());
             else app.audio().bgm().play_if_different(app.audio(), *app.vfs(), bgm::kRace, p->track | bgm::kIntro, true, 1.0f);
         }
+        // A race chosen: during the menu's transition (40 frames before the race screen takes over) its course (the exact
+        // core's, its track and its scene, all but the GPU uploads) and its opponents' files and models are prepared on
+        // threads (app/race_prep.h), for the race's set-up to take.
+        if (const std::optional<GameRequest>& p = flow_->pending_request();
+            p && p->kind == GameRequest::Kind::StartRace && app.vfs()) {
+            if (!race_warm_started_) {
+                race_warm_started_ = true;
+                app.set_race_prep(race_screen::start_race_prep(*app.vfs(), app.gpu(), app.showroom_wheels(), *p,
+                                                               race_info_random()));
+            }
+            // What the threads built is uploaded one piece a frame while the transition darkens the screen.
+            if (race_screen::RacePrep* prep = app.race_prep()) prep->pump_upload();
+        } else {
+            race_warm_started_ = false;
+        }
         if (auto r = flow_->take_request()) start_game(app, *r);
         if (flow_->take_controller_settings()) {
             // Our controller settings over the menus (Key Configuration): the menus wait on
@@ -681,6 +697,7 @@ private:
     std::unique_ptr<MenuRenderer> renderer_;
     std::unique_ptr<GameFlow> flow_;
     std::future<void> warm_; // the races' program data (waited for when the screen goes)
+    bool race_warm_started_ = false; // App::set_race_prep for the race request pending now
     MenuSounds sounds_;
     ScreenTransition transition_;
     video::MoviePlayer movie_;

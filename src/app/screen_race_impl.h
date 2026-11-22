@@ -296,13 +296,16 @@ private:
     sim::EngineCondition live_condition() const;
     // A car model (the course's folder, else the day folder), shared with the load's other reads of it.
     std::shared_ptr<const Bytes> read_car(App& app, const std::string& model) const;
-    // A car file (cars/<folder>/<model>, menu/cars/<model>): the load's own read of it,
+    // A car file (cars/<folder>/<model>, menu/cars/<model>): the load's own read of it, else the menus' (app/race_prep.h),
     // else read now; nullptr when missing.
     std::shared_ptr<const Bytes> read_car_file(App& app, const std::string& path) const;
     // The car files read during a load (start), by path: the load reads one up to three times (the player's car, the
     // spark points, the opponents' models). Let go when it ends.
     mutable std::map<std::string, std::shared_ptr<const Bytes>> car_files_;
     bool keep_car_files_ = false;
+    // What the menus prepared for the race start() loads (app/race_prep.h): dropped when the load ends, gone with the next
+    // start (or the screen).
+    std::shared_ptr<RacePrep> prep_;
     // The last start's course track, for the next start on the same course (restarts, retries).
     std::shared_ptr<const track::Track> course_track_;
     std::string course_track_label_;

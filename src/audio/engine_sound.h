@@ -72,6 +72,10 @@ public:
     // exported mod car's own, ModCar::sound_dir) to read them from instead (not through `banks`).
     bool load(Vfs& vfs, int sound_id, int variant, std::string* error = nullptr, EngineBanks* banks = nullptr,
               const std::string& dir = {});
+    // Reads a car's banks (or a bank file) into `banks` for a load to take (the menus, ahead of a race: app/race_prep.h).
+    // A missing or bad file is left out (the load that wants it reports it).
+    static void read_banks(const Vfs& vfs, int sound_id, int variant, EngineBanks& banks);
+    static void read_bank(const Vfs& vfs, const std::string& path, EngineBanks& banks);
     void set_banks(std::shared_ptr<const sound::EngineBank> engine, std::shared_ptr<const sound::EngineBank> exhaust);
     bool loaded() const { return engine_ || exhaust_; }
     const sound::EngineBank* engine_bank() const { return engine_.get(); }

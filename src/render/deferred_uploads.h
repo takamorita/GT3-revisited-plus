@@ -19,6 +19,15 @@ public:
         for (std::function<void()>& w : work_) w();
         work_.clear();
     }
+    // Runs the first upload left (in order: a later one may rely on an earlier one's); false when none was left. For a
+    // load that spreads them over frames that would otherwise wait (race_screen::RacePrep::pump_upload).
+    bool run_one() {
+        if (work_.empty()) return false;
+        std::function<void()> w = std::move(work_.front());
+        work_.erase(work_.begin());
+        w();
+        return true;
+    }
     // This thread's, or nullptr (upload at once).
     static DeferredUploads*& current() {
         thread_local DeferredUploads* d = nullptr;

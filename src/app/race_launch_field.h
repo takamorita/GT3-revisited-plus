@@ -1,7 +1,9 @@
 #pragma once
 
 // What a race launched from the menus races against, decided in one place: the race screen's launch
-// (RaceScreen::resolve_launch, build_vehicle, load_opponent_cars) calls these.
+// (RaceScreen::resolve_launch, build_vehicle, load_opponent_cars) and the menus' read-ahead
+// (race_prep.h, which works it out with a copy of the race module's generator) both call these,
+// so the read-ahead cannot drift from what the race does.
 
 #include "base/bytes.h"
 #include "base/game_random.h"
