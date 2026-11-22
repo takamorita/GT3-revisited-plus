@@ -24,6 +24,7 @@
 #include "menu/flow/theater_page.h"
 #include "race/custom_music.h"
 
+#include <future>
 #include <map>
 #include <memory>
 #include <optional>
@@ -454,6 +455,18 @@ private:
     void start_attract_demo();
     bool show_presentation();  // opens the next one; false when none
     void after_game();         // presentations, then the next round or the menu
+
+    // The next control's layouts (its page's pmb and the import page's), read and decoded on a
+    // thread while the Fadeout runs: the switch used to do it all on its last frame. The switch's
+    // last frame waits for them (a wait on the web's main thread runs the thread's proxied file
+    // reads). Last member: it goes first (its thread reads through a copy of reader_).
+    struct Prepared {
+        std::string set, lang;
+        std::vector<std::pair<int, std::unique_ptr<MenuScene>>> scenes;
+    };
+    std::future<Prepared> prepare_;
+    void prepare(const std::string& set, const std::string& page);
+    void take_prepared();
 };
 
 } // namespace gt3r::menu::flow

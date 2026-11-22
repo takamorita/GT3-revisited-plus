@@ -60,7 +60,10 @@ public:
     const MblFile& flow() const { return mbl_; }
 
     // Path of the layout file holding pages with pmb number `n`.
-    std::string pmb_path(int n) const;
+    std::string pmb_path(int n) const { return pmb_path(lang_, name_, n); }
+    static std::string pmb_path(const std::string& lang, const std::string& name, int n);
+    // The pmb number a page's layout is looked up in (pages not in the .mbl: 1).
+    static int page_pmb(const MblFile& flow, std::string_view page);
 
     struct PageRef {
         const MblPage* flow = nullptr; // nullptr if the page is not in the .mbl
@@ -76,6 +79,13 @@ public:
     PageRef page(std::string_view name) const;
     // Loads (and caches) pmb number n; nullptr if it cannot be read/parsed.
     const MenuScene* scene(int n) const;
+    bool has_scene(int n) const { return scenes_.count(n) != 0; }
+    // Reads and decodes a pmb without the layout patches (game code's, which run where the set
+    // is used): this part may run on another thread. nullptr if it cannot be read/parsed.
+    static std::unique_ptr<MenuScene> load_scene(const FileReader& reader, const std::string& path);
+    // Takes pmb `n` loaded by load_scene (on another thread, ahead of a menu switch) unless the
+    // set has it; the layout patches run here as scene() runs them.
+    void adopt(int n, std::unique_ptr<MenuScene> s) const;
 
 private:
     FileReader reader_;
