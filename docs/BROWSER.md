@@ -59,7 +59,24 @@ on a gamepad so that the browser lets the page see it.
 ## Not tested yet
 
 - Racing wheels and force feedback.
-- Online battle.
+
+## Online battle
+
+A browser has no UDP, so the browser build races online through a relay server that also takes WebSockets.
+The usual relay server (`gt3r.gameversions.com`) does not: run your own `tools/gt3r-relay` (Linux or macOS;
+"Running your own relay" in [dev/ONLINE.md](dev/ONLINE.md)) with a port for browsers:
+
+```sh
+gt3r-relay --ws-port 47752 --ws-allow-lan
+```
+
+- In the browser, set the relay server (in the Online battle lobby) to `ws://<the relay's address>:47752`.
+  Players on other platforms set the same relay at its UDP port (`<the relay's address>:47631`), and everyone
+  creates or joins sessions by code as usual. To the others a browser is an ordinary player at the relay's address.
+- A page served over https (the copy on GitHub Pages) can open only `wss://`: put a TLS proxy (Caddy, nginx, ...)
+  in front of the WebSocket port. The page from the bundled `serve` (http://localhost) can use `ws://`.
+- In a browser there is no Host by address; Join by address goes through the relay (`--ws-allow-lan` lets it
+  reach addresses in your LAN).
 
 ## Speed
 
