@@ -434,7 +434,7 @@ void View3D::release_target() {
         if (*t) SDL_ReleaseGPUTexture(dev, *t);
         *t = nullptr;
     }
-    last_valid_ = snap_valid_ = false;
+    last_valid_ = snap_valid_ = shown_valid_ = false;
     width_ = height_ = 0;
 }
 
@@ -553,6 +553,15 @@ void View3D::draw(SDL_Renderer* renderer, const SDL_FRect& rect, const Mat4& vie
     SDL_GPUCommandBuffer* cmd = SDL_AcquireGPUCommandBuffer(ctx_.device());
     if (!cmd) return;
 
+    // The last picture shown, for the dissolve and the trail: still in color_, which this draw's
+    // passes have not written yet. Copied only when one of them reads it (it was copied after every
+    // draw: a full picture a frame for the few frames that use it).
+    last_valid_ = false;
+    if ((opt.snapshot || opt.trail > 0) && shown_valid_ && ensure_post(&last_)) {
+        copy_picture(cmd, color_, last_, shown_w_, shown_h_, cycle);
+        last_valid_ = true;
+        last_w_ = shown_w_, last_h_ = shown_h_;
+    }
     // The dissolve's frozen picture: the last one shown.
     if (opt.snapshot) {
         snap_valid_ = last_valid_ && ensure_post(&snap_);
@@ -699,13 +708,8 @@ void View3D::draw(SDL_Renderer* renderer, const SDL_FRect& rect, const Mat4& vie
             encode_post(cmd, pass, last_, last_w_, last_h_, std::min(opt.trail, 1.0f), nullptr);
         SDL_EndGPURenderPass(pass);
     }
-    if (opt.keep_last && ensure_post(&last_)) {
-        copy_picture(cmd, color_, last_, pw, ph, cycle);
-        last_valid_ = true;
-        last_w_ = pw, last_h_ = ph;
-    } else if (!opt.keep_last) {
-        last_valid_ = false;
-    }
+    shown_valid_ = opt.keep_last; // (a picture drawn without it, e.g. the quick menu's background, is not read)
+    shown_w_ = pw, shown_h_ = ph;
     if (capture_.count > 0) capture_frame(cmd);
     // Supersampled past twice the on-screen size: halved first by a linear blit (each pixel the
     // mean of 2 x 2), so the 2D renderer's linear scaling, which reads 2 x 2 texels per pixel,
