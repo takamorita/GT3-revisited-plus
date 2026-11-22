@@ -983,7 +983,9 @@ SDL_AppResult App::event(const SDL_Event& e) {
         mouse_used_ns_ = SDL_GetTicksNS();
         if (cursor_hidden_) SDL_ShowCursor(), cursor_hidden_ = false;
     }
-    if (audio_ && (e.type == SDL_EVENT_AUDIO_DEVICE_ADDED || e.type == SDL_EVENT_AUDIO_DEVICE_REMOVED)) audio_->device_event(e);
+    if (audio_ && (e.type == SDL_EVENT_AUDIO_DEVICE_ADDED || e.type == SDL_EVENT_AUDIO_DEVICE_REMOVED ||
+                   e.type == SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED))
+        audio_->device_event(e);
     if (e.type == SDL_EVENT_DROP_FILE && e.drop.data && (screens_.empty() || !screens_.back()->takes_dropped_file(e.drop.data)))
         set_dialog_result(e.drop.data);
     if (e.type == SDL_EVENT_KEY_DOWN && e.key.scancode == SDL_SCANCODE_F12 && !e.key.repeat) screenshot_requested_ = true;

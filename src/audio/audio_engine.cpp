@@ -169,6 +169,8 @@ void AudioEngine::set_output_device(const std::string& name) {
 
 void AudioEngine::device_event(const SDL_Event& e) {
     if (e.adevice.recording) return;
+    buffer_device_ = 0; // music_audible_position asks the buffer length again (the default may have moved)
+    if (e.type == SDL_EVENT_AUDIO_DEVICE_FORMAT_CHANGED) return;
     if (device_name_.empty() && device_ != 0) return; // the default follows the system by itself
     request_switch(); // also an immediate retry while no device is open
 }
@@ -492,10 +494,17 @@ double AudioEngine::music_audible_position() const {
     // Queued input (S16 at the stream's rate), then the device's own buffer.
     const int queued = SDL_GetAudioStreamQueued(music_stream_);
     if (queued > 0) pos -= double(queued) / (2.0 * ch * rate);
-    SDL_AudioSpec spec{};
-    int frames = 0;
-    if (SDL_GetAudioDeviceFormat(SDL_GetAudioStreamDevice(music_stream_), &spec, &frames) && frames > 0 && spec.freq > 0)
-        pos -= double(frames) / spec.freq;
+    // The device's own buffer: asked once per device (SDL_GetAudioDeviceFormat takes the device's lock, which the
+    // audio thread holds while it mixes: asked every frame, the race waited up to 8 ms for the mix every ~5 frames).
+    const SDL_AudioDeviceID dev = SDL_GetAudioStreamDevice(music_stream_);
+    if (dev != buffer_device_) {
+        buffer_device_ = dev, buffer_seconds_ = 0;
+        SDL_AudioSpec spec{};
+        int frames = 0;
+        if (dev && SDL_GetAudioDeviceFormat(dev, &spec, &frames) && frames > 0 && spec.freq > 0)
+            buffer_seconds_ = double(frames) / spec.freq;
+    }
+    pos -= buffer_seconds_;
     return std::max(pos, 0.0);
 }
 
