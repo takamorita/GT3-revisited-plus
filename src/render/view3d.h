@@ -451,6 +451,10 @@ private:
         u32 first = 0, count = 0;
     };
     std::map<std::tuple<const DrawItem*, const GpuModel::MeshInfo*, size_t>, ClipRange> clipped_;
+    // The guard-band items' primitives none of whose vertices lies beyond the guard band this draw
+    // (upload_clipped, sorted): model.vert drops none of their triangles, so nothing of them is
+    // discarded for that (PipelineKey::no_kill).
+    std::vector<std::pair<const DrawItem*, const scene::Primitive*>> unclipped_;
     bool guard_on_ = false; // this draw's guard-band items are clipped (encode)
     // A vertex and an index buffer refilled every draw, through one transfer buffer (each grown to
     // twice its size when too small).
@@ -468,7 +472,7 @@ private:
     bool post_wanted(const DrawOptions& o) const;
     bool ensure_post(SDL_GPUTexture** t);
     void encode_post(SDL_GPUCommandBuffer* cmd, SDL_GPURenderPass* pass, SDL_GPUTexture* picture, int picture_w,
-                     int picture_h, float alpha, const DrawOptions::PostGrade* grade);
+                     int picture_h, float alpha, const DrawOptions::PostGrade* grade, bool single = false);
     // Copies the w x h corner (a picture) of `from` to `to` (cycling `to`: see draw).
     void copy_picture(SDL_GPUCommandBuffer* cmd, SDL_GPUTexture* from, SDL_GPUTexture* to, int w, int h, bool cycle);
     bool ensure_quad();

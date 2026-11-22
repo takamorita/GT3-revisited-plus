@@ -311,7 +311,9 @@ void shade() {
         // GS TEST.DATE with DATM 0: only where Ad < 0x80 (0x80 = 1.0 here), not on texels at full
         // reflectivity. (The 0x80 an earlier reflection pass leaves: the decoder drops the
         // triangles such a pass repeats.)
+#ifndef NO_KILL
         if (u.output_mode.w > 0.5 && ad > 254.0 / 255.0) discard;
+#endif
         vec3 n = normalize(v_normal);
         if (!gl_FrontFacing) n = -n;
         vec3 view = normalize(v_world - u.camera_pos.xyz);
@@ -357,7 +359,9 @@ void shade() {
     }
     // Alpha test: discard alpha <= x; x >= 2: the inverse (keep only alpha <= x - 2), the
     // second half of a GS AFAIL = RGB_ONLY primitive.
+#ifndef NO_KILL
     if (u.params.x >= 0.0 && (u.params.x < 2.0 ? c.a <= u.params.x : c.a > u.params.x - 2.0)) discard;
+#endif
 #ifdef PLAIN
     if (u.params.y < 0.5) c.rgb *= v_lit; // GT3's VU lighting, as below
 #else
@@ -433,7 +437,13 @@ void main() {
 #ifdef SPIN_COPIES
     spin_copy_samples();
 #endif
+    // NO_KILL (PipelineKey::no_kill): the draws of which nothing is discarded (no alpha test, no fade, no
+    // triangle dropped at GT3's guard band or far plane; View3D checks each one). A shader that can
+    // discard makes GPUs test the depth after shading when it also writes the depth, and the pixels
+    // hidden behind what is already drawn are then shaded for nothing; without one they are not.
+#ifndef NO_KILL
     if (v_fog_w.y > 0.0 || faded_out()) discard;
+#endif
     v_color = u.output_mode.y > 0.5 ? v_color_in * gl_FragCoord.w : v_color_in;
     v_lit = v_lit_w * gl_FragCoord.w;
     v_fog = v_fog_w.x * gl_FragCoord.w;
