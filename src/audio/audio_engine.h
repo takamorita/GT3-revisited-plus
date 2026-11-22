@@ -68,7 +68,8 @@ public:
     // The connected playback devices' names, in SDL's order, without repeats.
     static std::vector<std::string> playback_devices();
     // SDL_EVENT_AUDIO_DEVICE_ADDED / _REMOVED: the sound moves to the chosen device when it
-    // is plugged in and back to the default when it goes.
+    // is plugged in and back to the default when it goes. Any of them, and _FORMAT_CHANGED:
+    // the device's buffer length is asked again.
     void device_event(const SDL_Event& e);
 
     // Streams an .ads file through the VFS (mods may replace it) at request level `volume`.
@@ -158,6 +159,9 @@ private:
     static void SDLCALL feed_voices(void* user, SDL_AudioStream* stream, int additional, int total);
 
     SDL_AudioStream* music_stream_ = nullptr;
+    // music_audible_position's device buffer, asked again for another device or a device event.
+    mutable SDL_AudioDeviceID buffer_device_ = 0;
+    mutable double buffer_seconds_ = 0;
     mutable std::mutex mutex_;
     std::unique_ptr<MusicStream> music_;
     std::shared_ptr<Bytes> music_data_; // backing store when not streamed from disc
