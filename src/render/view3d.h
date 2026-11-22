@@ -138,7 +138,8 @@ struct DrawOptions {
     } post_grade;
     // the dissolve: the picture frozen by `snapshot` (the last one shown before this draw)
     // over it at weight `dissolve`; the trail: the last picture shown at weight `trail`
-    // (recursive: it holds its own trail). `keep_last` keeps every picture for them.
+    // (recursive: it holds its own trail). `keep_last`: this picture is one they may read (copied on
+    // the next draw, only when that draw reads it).
     bool snapshot = false;
     float dissolve = 0, trail = 0;
     bool keep_last = false;
@@ -537,6 +538,8 @@ private:
     // a quad over the target.
     SDL_GPUTexture *scene_ = nullptr, *last_ = nullptr, *snap_ = nullptr;
     bool last_valid_ = false, snap_valid_ = false;
+    bool shown_valid_ = false; // color_ holds the last picture shown, drawn with keep_last (shown_w_ x shown_h_)
+    int shown_w_ = 0, shown_h_ = 0;
     int last_w_ = 0, last_h_ = 0, snap_w_ = 0, snap_h_ = 0; // their pictures' sizes
     SDL_GPUBuffer *quad_vb_ = nullptr, *quad_ib_ = nullptr;
     // The screen geometry of the passes after the scene (refilled per draw), and the picture's copy
