@@ -21,6 +21,14 @@ set(SDL_PTHREADS ON CACHE BOOL "" FORCE)
 
 function(gt3r_web_targets)
 
+# SDL's audio output: cmake/web/sdl_webaudio.c (an AudioWorklet fed by SDL's own audio thread) in
+# place of SDL's ScriptProcessorNode driver, whose mixing ran on the browser's main thread.
+if(TARGET SDL3-static)
+  get_target_property(_sdl_sources SDL3-static SOURCES)
+  list(FILTER _sdl_sources EXCLUDE REGEX "/src/audio/emscripten/SDL_emscriptenaudio\\.c$")
+  set_property(TARGET SDL3-static PROPERTY SOURCES ${_sdl_sources} ${CMAKE_SOURCE_DIR}/cmake/web/sdl_webaudio.c)
+endif()
+
 set(GT3R_WEB_COMMON_LINK
   -pthread
   -fwasm-exceptions

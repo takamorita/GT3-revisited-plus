@@ -1,6 +1,9 @@
 #include "audio/audio_engine.h"
 
 #include "audio/music_file.h"
+#ifdef __EMSCRIPTEN__
+#include "audio/web_read_ahead.h"
+#endif
 #include "base/config.h"
 #include "base/log.h"
 #include "vfs/vfs.h"
@@ -396,6 +399,10 @@ std::unique_ptr<MusicStream> open_ads_music(AdsStream::ReadFn read) {
 
 void AudioEngine::start_stream(std::unique_ptr<MusicStream> stream, std::shared_ptr<Bytes> data, float volume,
                                bool resume, const std::string& what, float trim) {
+#ifdef __EMSCRIPTEN__
+    // The audio thread must not wait for the disc (web_read_ahead.h).
+    stream = std::make_unique<WebReadAheadMusic>(std::move(stream));
+#endif
     sequencer_.stop(voices_);
     replaced_sequence_ = -1;
     const u32 rate = stream->sample_rate(), channels = stream->channels();
