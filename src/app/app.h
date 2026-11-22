@@ -30,6 +30,7 @@ namespace gt3r {
 
 class App;
 struct PresenceText; // app/presence.h
+namespace race_screen { class RacePrep; } // app/race_prep.h (a shared_ptr's deleter is set where it is complete)
 
 class Screen {
 public:
@@ -156,6 +157,12 @@ public:
     void remember_race_scale();
     // Applies [video] render_scale (after the setting changed).
     void apply_render_scale();
+
+    // The race the menus chose, being prepared while their transition runs (app/race_prep.h): the menus set it, the race
+    // screen's load takes it. Setting another lets the last one go (waiting for its threads).
+    void set_race_prep(std::shared_ptr<race_screen::RacePrep> p) { race_prep_ = std::move(p); }
+    race_screen::RacePrep* race_prep() { return race_prep_.get(); }
+    std::shared_ptr<race_screen::RacePrep> take_race_prep() { return std::move(race_prep_); }
 
     void push(std::unique_ptr<Screen> s) { pending_.push_back(std::move(s)); }
     void pop() { ++pops_; }
@@ -339,6 +346,7 @@ private:
     bool phone_sim_ = false; // GT3R_PHONE=1: desktop window shaped like a 20:9 phone
     std::optional<platform::DisplayInsets> display_insets_; // phones: cutout and corner radius (pixels)
     int insets_retry_ = 0;                                  // frames until the next query (0: now)
+    std::shared_ptr<race_screen::RacePrep> race_prep_; // (last: it goes before the disc and the GPU it reads and builds with)
 };
 
 // Screen factories (one file each).

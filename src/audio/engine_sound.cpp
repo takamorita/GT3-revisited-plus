@@ -79,6 +79,19 @@ std::string EngineSound::variant_dir(int variant) {
 
 EngineSound::~EngineSound() = default;
 
+void EngineSound::read_banks(const Vfs& vfs, int sound_id, int variant, EngineBanks& banks) {
+    const std::string id = engine_id(sound_id);
+    for (const std::string& path : {"sound/engine/" + id, "sound/" + variant_dir(variant) + "/" + id}) read_bank(vfs, path, banks);
+}
+
+void EngineSound::read_bank(const Vfs& vfs, const std::string& path, EngineBanks& banks) {
+    try {
+        load_bank(vfs, path, &banks);
+    } catch (const std::exception&) {
+        // the load that wants it reports it
+    }
+}
+
 bool EngineSound::load(Vfs& vfs, int sound_id, int variant, std::string* error, EngineBanks* shared,
                        const std::string& dir) {
     const std::string id = engine_id(sound_id);

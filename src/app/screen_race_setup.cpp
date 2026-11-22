@@ -15,16 +15,21 @@ namespace gt3r::race_screen {
 // (optional) is played back instead of driving.
 void RaceScreen::start(App& app, const Replay* replay) {
     error_.clear();
-    // The car files this load reads, kept for its other reads of them (read_car): let go when it ends.
+    // What the menus prepared for this race (app/race_prep.h), and the car files this load reads, kept for its other
+    // reads of them (read_car): let go when it ends.
+    prep_ = app.take_race_prep();
     car_files_.clear();
     keep_car_files_ = true;
     // The engine banks: those the race's cars still play kept (restarts and the next start share them), the others read
-    // again (a mod's edited bank too).
+    // again (a mod's edited bank too); the opponents' read ahead by the menus added.
     std::erase_if(engine_banks_, [](const auto& b) { return b.second.use_count() == 1; });
+    if (prep_)
+        if (const EngineBanks* b = prep_->banks()) engine_banks_.insert(b->begin(), b->end());
     struct LetGo {
         RaceScreen& s;
         ~LetGo() {
             s.car_files_.clear(), s.keep_car_files_ = false;
+            if (s.prep_) s.prep_->drop(); // (kept until the next start: its threads end on their own)
         }
     } let_go{*this};
     reset_session_best(); // a new visit: the runs and retries that follow share it
@@ -82,18 +87,7 @@ void RaceScreen::start(App& app, const Replay* replay) {
         std::shared_ptr<const Bytes> course = read ? std::make_shared<const Bytes>(std::move(*read)) : nullptr;
         // The car models' time of day from the course's Env0 flags: bit 19 eve,
         // else bit 15 night, else day.
-        car_folder_ = "cars/day/";
-        if (course) {
-            try {
-                course::CourseFile cf0 = course::CourseFile::parse(*course);
-                ByteSpan env = cf0.section(*course, course::kSlotEnv);
-                if (env.size() > 0x14 && std::memcmp(env.data(), "Env0", 4) == 0) {
-                    u32 fl = rd32(env, 0x10);
-                    car_folder_ = (fl & 0x80000) ? "cars/eve/" : (fl & 0x8000) ? "cars/night/" : "cars/day/";
-                }
-            } catch (const std::exception&) {
-            }
-        }
+        car_folder_ = course ? car_folder_for_course(*course) : "cars/day/";
         if (!course) throw FormatError("missing " + path);
         const bool same_course = course_bytes_ && *course_bytes_ == *course; // (as the last start's)
         course_bytes_ = course;
@@ -110,8 +104,9 @@ void RaceScreen::start(App& app, const Replay* replay) {
         car_visual_.reset();
         drop_vehicle();
         track_.reset();
-        // The course's track: the last start's when it was on this course, else built here.
-        std::shared_ptr<const track::Track> track;
+        // The course's track and scene: the menus' (app/race_prep.h), else built here (the track: else the last start's).
+        const bool prepared = prep_ && prep_->label == ce.label; // (its course_file_path, on this Vfs: path)
+        std::shared_ptr<const track::Track> track = prepared ? prep_->take_track() : nullptr;
         if (!track && same_course && course_track_label_ == ce.label) track = course_track_;
         if (!track) track = track::Track::from_course_file(*course, ce.label);
         course_track_ = track, course_track_label_ = ce.label;
@@ -124,7 +119,8 @@ void RaceScreen::start(App& app, const Replay* replay) {
             if (!h.hit || h.normal.y < 0.05f) return std::nullopt;
             return h.height;
         });
-        course_scene_ = std::make_unique<CourseScene>(*app.gpu(), *course, ce.label, preset_.sheen);
+        if (prepared && preset_.sheen) course_scene_ = prep_->take_scene();
+        if (!course_scene_) course_scene_ = std::make_unique<CourseScene>(*app.gpu(), *course, ce.label, preset_.sheen);
         part("scenery");
         for (race::SceneryFade& f : scenery_fades_) f.reset();
         // The brake parts inside the race cars' wheels (loaded before every race).
@@ -841,6 +837,7 @@ void RaceScreen::load_opponent_cars(App& app, const RaceField& f) {
     std::vector<std::pair<std::string, int>> keys; // each opponent's model, in order
     std::vector<CarBuild> builds; // (app/race_prep.h)
     std::vector<std::pair<std::string, int>> build_keys;
+    int built_ahead = 0;
     auto take = [&](BuiltAhead& a) { // (a model built on a thread: its uploads here)
         a.uploads.run();
         a.visual->set_full_detail(full_car_detail_);
@@ -867,6 +864,9 @@ void RaceScreen::load_opponent_cars(App& app, const RaceField& f) {
         std::shared_ptr<CarVisual>& v = by_model[key];
         if (!v)
             if (auto c = opp_visual_cache_.find(key); c != opp_visual_cache_.end()) v = c->second;
+        if (!v && !bm.active() && prep_) // (built by the menus while their transition ran: app/race_prep.h)
+            if (std::optional<BuiltAhead> ahead = prep_->take_built(car_folder_, model, paint, showroom_wheels_))
+                v = take(*ahead), ++built_ahead;
         if (v || std::find(build_keys.begin(), build_keys.end(), key) != build_keys.end()) continue;
         // A model to build: its files read here (the disc is this thread's), the model built below.
         CarBuild b;
@@ -888,6 +888,7 @@ void RaceScreen::load_opponent_cars(App& app, const RaceField& f) {
         else LOG_WARN("Race: opponent model %s: %s", builds[k].model.c_str(), built[k].error.c_str());
     for (const std::pair<std::string, int>& key : keys) opp_visuals_.push_back(by_model[key]);
     opp_visual_cache_ = by_model; // (models no longer in the field are let go)
+    if (built_ahead) LOG_INFO("Race: %d opponents' models built ahead, %zu here", built_ahead, builds.size());
     // Engine notes of the opponents (their base car's sound bank) and their extra sounds.
     std::vector<OpponentEngines::Car> sounds;
     for (OpponentSound& o : opp_sound_) o.extra.stop(app.audio().voices());
@@ -1003,7 +1004,7 @@ void RaceScreen::reset_run_state() {
 
 std::shared_ptr<const Bytes> RaceScreen::read_car_file(App& app, const std::string& path) const {
     if (auto it = car_files_.find(path); it != car_files_.end()) return it->second;
-    std::shared_ptr<const Bytes> f;
+    std::shared_ptr<const Bytes> f = prep_ ? prep_->file(path) : nullptr; // (the menus may have read it: app/race_prep.h)
     if (!f)
         if (std::optional<Bytes> r = app.vfs()->read(path)) f = std::make_shared<const Bytes>(std::move(*r));
     if (keep_car_files_) car_files_[path] = f;

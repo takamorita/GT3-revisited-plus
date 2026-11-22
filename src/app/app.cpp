@@ -695,6 +695,7 @@ void App::close_disc() {
     music_.set_disc_songs({}, {}); // its songs' measuring reads this disc
     game::close_gt_mode(); // its data, reader and save library belong to this disc
     texture_pack::set_pack(nullptr);
+    race_prep_.reset(); // (it reads this disc)
     vfs_.reset();
     disc_.reset();
 }
