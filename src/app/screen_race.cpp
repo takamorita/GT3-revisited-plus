@@ -112,8 +112,25 @@ void RaceScreen::update(App& app, double dt) {
     if (!init_) {
         if ((from_menu_ || online_) && !loading_drawn_) return; // the first frame: the picture only
         init(app);
+#ifdef __EMSCRIPTEN__
+        // In a browser the load below holds the main thread, and the transition can only move between its parts. So the
+        // load waits for the transition to cover the screen (the game shows the covered picture while it loads, rather
+        // than one stopped halfway), and the course, the player's car and the race's own files are read meanwhile.
+        if (begin_pending_ && app.vfs() && !courses_.empty() && !cars_.empty()) {
+            const std::string model = launch_model_.empty() ? cars_[size_t(car_sel_)].model : launch_model_;
+            app.vfs()->prefetch({course_path(*app.vfs(), courses_[size_t(course_sel_)].label), "cars/day/" + model,
+                                 "menu/cars/" + model, "race/brake.bin", "cameras/start.cam", "race/glare.img"});
+        }
+#endif
         if (begin_pending_) return;
     } else if (begin_pending_) {
+#ifdef __EMSCRIPTEN__
+        if (loading_.valid() && loading_.transition.active() &&
+            loading_.transition.frames() < menu::flow::ScreenTransition::settle_frames(loading_.transition.type())) {
+            if (RacePrep* prep = app.race_prep()) prep->pump_upload(); // (what the menus built: one piece a frame while the screen is covered)
+            return;
+        }
+#endif
         begin_pending_ = false;
         begin(app);
         return;
