@@ -1,8 +1,11 @@
 #pragma once
 
+#include <atomic>
 #include "disc/volume.h"
 #include "formats/texture_pack.h"
 
+#include <memory>
+#include <mutex>
 #include <functional>
 #include <map>
 #include <optional>
@@ -55,6 +58,11 @@ public:
 
     bool exists(const std::string& path) const;
     std::optional<Bytes> read(const std::string& path) const;
+    // Reads `paths` on a thread of its own, for read() to hand over later: a load that knows what it will need reads
+    // it while something else is on screen (the race, its course and car while the menu's transition is still
+    // running). read() hands a prefetched file over every time it is asked for it, until the next prefetch(); a file
+    // still being read when read() asks is read there as usual.
+    void prefetch(std::vector<std::string> paths);
 
     // Random-access stream over a file, for large assets (movies, music) that
     // should not be loaded whole. Disc entries stored uncompressed and mod
@@ -102,12 +110,21 @@ public:
 
 private:
     void rebuild_index();
+    std::optional<Bytes> read_now(const std::string& path) const; // read() without the prefetched files
+    // prefetch()'s read: a large uncompressed disc file in pieces with pauses (the main thread's reads go between).
+    std::optional<Bytes> read_ahead(const std::string& path, const std::atomic<bool>& stop) const;
     Volume* base_;
     std::optional<Language> language_;
     std::vector<ModInfo> mods_;
     std::map<std::string, std::string> overrides_; // vol path -> host path
     std::map<std::string, std::string> override_source_; // vol path -> mod id
     std::shared_ptr<const texture_pack::Pack> textures_;
+    struct Prefetch; // (its destructor stops and joins its thread)
+    // prefetch() replaces it on the main thread while worker threads read() (RacePrep's): read() copies the pointer
+    // under pf_mu_ and uses its copy, which keeps the old Prefetch alive until it is done with it. Last: it goes first,
+    // before what its thread reads.
+    mutable std::mutex pf_mu_;
+    std::shared_ptr<Prefetch> prefetch_;
 };
 
 std::string normalize_vfs_path(std::string_view path);
