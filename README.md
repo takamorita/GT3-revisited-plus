@@ -1,3 +1,35 @@
+# GT3 Revisited Plus
+
+A fork of [GT3 Revisited](https://github.com/matt-pulsipher/GT3-revisited) v0.7.1 that carries improvements meant
+for GT3 Revisited itself, each on a branch of its own so that it can be offered as a pull request, and a build for
+browsers:
+
+- **Faster race loads and less work per frame**, with the same pictures: the race's course, opponents and sounds
+  prepared while the menus' transition runs, files and banks read once, menu layouts decoded ahead, fewer GPU
+  waits and copies.
+- **Browsers**: Chrome and Edge on a computer, built with Emscripten (WebAssembly, WebGL2), online battle included
+  through a relay server's WebSocket port.
+
+| Play | |
+|---|---|
+| In a browser | <https://takamorita.github.io/GT3-revisited-plus/> ([docs/BROWSER.md](docs/BROWSER.md)) |
+| On Windows | this fork's [Releases](https://github.com/takamorita/GT3-revisited-plus/releases): `gt3r-windows-x64.zip`, used as described under [Running](#running) below |
+| On macOS, Linux, Android, iOS, Meta Quest | GT3 Revisited's [Releases](https://github.com/matt-pulsipher/GT3-revisited/releases) |
+
+| Branch | |
+|---|---|
+| `main` | GT3 Revisited's `master` with every `pr/*` branch merged |
+| `pr/*` | one topic each, on GT3 Revisited's `master` (`pr/load-1` ... `pr/load-5` and `pr/platform-hooks`, `pr/web`, `pr/web-online` build on each other) |
+| `master` | GT3 Revisited's, unchanged |
+
+The fork is MIT, as GT3 Revisited.
+
+---
+
+*Below is GT3 Revisited's README, unchanged. The packages under "Installing" are on
+[GT3 Revisited's Releases](https://github.com/matt-pulsipher/GT3-revisited/releases) page; this fork's Releases have
+the browser and Windows builds.*
+
 # GT3 Revisited
 
 An open-source reimplementation of the *Gran Turismo 3 A-Spec* engine for
