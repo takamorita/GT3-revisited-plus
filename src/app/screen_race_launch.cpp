@@ -3,6 +3,7 @@
 // into the course, car, event and options the run is built from.
 // (Race screen code map: docs/dev/RACE.md.)
 
+#include "app/race_launch_field.h"
 #include "app/screen_race_impl.h"
 #include "game/language_rules.h"
 #include "race/pool_draw.h"
@@ -117,29 +118,16 @@ void RaceScreen::resolve_launch() {
     // Arcade time trial ("compulsory"): course ids tt01..tt10 are the
     // time-attack events AT010001..AT100001 (course + a fixed car variant).
     const menu::flow::GameRequest& rq = launch_.request;
-    std::string code = rq.event.empty() ? rq.race_code : rq.event;
-    if (rq.course.size() == 4 && rq.course.rfind("tt", 0) == 0) code = "AT" + rq.course.substr(2) + "0001";
+    const std::string code = launch_event_code(rq);
     const data::Event* ev = db_.event(code);
-    std::string course = launch_.request.course;
-    if ((course.empty() || course_path(*app_->vfs(), course).empty()) && ev) course = ev->course;
-    if (course.empty() || course_path(*app_->vfs(), course).empty()) course = "trialmt";
+    const std::string course = launch_course(*app_->vfs(), rq, ev);
     // Menu car ids are database labels without their leading '_'; variants map to their base car.
-    auto base_car = [&](const std::string& id) -> std::string {
-        for (const std::string& l : {id, "_" + id}) {
-            if (db_.car(l)) return l;
-            if (const data::CarVariant* v = db_.variant(l)) return v->car;
-            for (const data::CarVariant& v : db_.arcade_cars())
-                if (v.label == l && db_.car(v.car)) return v.car;
-        }
-        return {};
-    };
+    auto base_car = [&](const std::string& id) { return launch_base_car(db_, id); };
     // A licence test's car and colour in the game's language (gt_mode §21, docs/dev/GT_MODE.md "Language"): entry 0, or
     // entry 1.
     const game::LicenseCar license = ev ? game::license_car(db_, *ev, db_.language()) : game::LicenseCar{};
     const bool license_mode = rq.mode == "go_license";
-    std::string car = base_car(launch_.request.car);
-    if (car.empty() && ev && !ev->entries.empty()) car = base_car(license_mode ? license.entry : ev->entries[0]);
-    if (car.empty()) car = "r34_gtr_v_99";
+    std::string car = launch_player_car(db_, rq, ev);
     preset_.course = course;
     preset_.car = car;
     // Courses the menu offers that are not in the database course list (e.g. licence layouts).
@@ -148,19 +136,15 @@ void RaceScreen::resolve_launch() {
     if (!listed) courses_.push_back({course, course});
     // Races with opponents: the event gives the field, laps and AI parameters.
     if ((rq.mode == "single_race" || rq.mode == "go_race") && db_.event(code)) race_event_ = code;
+    // The field (race_launch_field.h).
+    race_opponents_ = launch_opponents(db_, rq, ev, online_, race_info_random(), &race_opponent_color_ids_);
     if (!rq.opponents.empty()) { // GT mode: the field drawn by the menus; Quick race's custom race: the player's own
-        race_opponents_ = rq.opponents;
         race_opponent_paints_ = rq.opponent_paints;
         race_opponent_skills_ = rq.opponent_skills;
         race_no_rubber_band_ = rq.no_rubber_band;
         race_chosen_laps_ = rq.laps;
         race_player_slot_ = rq.player_slot;
     }
-    // Arcade Single Race: the field is drawn from the event's pool with the race module's
-    // generator (gt_mode §20.4), slots 1 .. cars-1.
-    else if (rq.mode == "single_race" && ev && !online_)
-        race_opponents_ = race::draw_opponents(db_, *ev, std::max(int(ev->cars_in_race), 1) - 1, race_info_random(),
-                                               &race_opponent_color_ids_);
     // The arcade time trial: one timed lap, whatever the event's lap count (presentation §B7).
     if (rq.mode == "time_trial" && ev) race_laps_ = race::kTimeTrialLaps;
     // Time attack / licence tests: a flying start when the event gives one.
