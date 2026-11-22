@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GT3 Revisited Web</title>
+<script>
+  // Served without the COOP/COEP headers (a static host such as GitHub Pages): coi-sw.js adds them, and the page
+  // reloads once under it. Served with them (web/serve.zig, web/serve.mjs) nothing is registered.
+  (() => {
+    const key = 'gt3r-coi-reload';
+    try { if (self.crossOriginIsolated) sessionStorage.removeItem(key); } catch (e) {}
+    if (self.crossOriginIsolated || !self.isSecureContext || !navigator.serviceWorker) return;
+    let reloaded = false;
+    try { reloaded = sessionStorage.getItem(key) === '1'; } catch (e) {}
+    if (reloaded) return; // (reloaded once already and still not isolated: the start page says so)
+    self.gt3rCoiPending = true;
+    const reload = () => {
+      try { sessionStorage.setItem(key, '1'); } catch (e) {}
+      location.reload();
+    };
+    navigator.serviceWorker.register('coi-sw.js').then((reg) => {
+      // (Already there: a page it does not control, as after Shift+Reload, or an old worker's. Else when it takes over.)
+      if (navigator.serviceWorker.controller || reg.active) reload();
+      else navigator.serviceWorker.addEventListener('controllerchange', reload);
+    }, () => { self.gt3rCoiPending = false; });
+  })();
+</script>
+<style>
+  :root {
+    --bg: #0e1015; --panel: #1a1d26; --line: #3a3f52; --text: #e6e8ee; --dim: #9aa0b1;
+    --accent: #ffc42e; --accent-text: #1a1406; --bad: #ff7a6b;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif; }
+  #canvas { display: block; width: 100vw; height: 100vh; outline: none; }
+  #start { position: fixed; inset: 0; display: grid; place-items: center; padding: 16px; box-sizing: border-box;
+    background: var(--bg); overflow: auto; }
+  #start.dragging { outline: 3px dashed var(--accent); outline-offset: -12px; }
+  .card { width: min(560px, 100%); }
+  h1 { margin: 0 0 4px; font-size: 26px; letter-spacing: .02em; color: var(--accent); }
+  p { margin: 6px 0; color: var(--dim); }
+  .actions { display: grid; gap: 10px; margin: 22px 0 14px; }
+  button { font: inherit; padding: 12px 16px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text); cursor: pointer; text-align: left; }
+  button:hover:not(:disabled) { border-color: var(--dim); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  button small { display: block; font-weight: 400; opacity: .8; }
+  #message { min-height: 1.5em; color: var(--bad); white-space: pre-wrap; }
+  .note { font-size: 13px; }
+  /* Data (data-browser.js) */
+  #data { position: fixed; inset: 0; display: grid; place-items: start center; padding: 16px; box-sizing: border-box;
+    background: var(--bg); overflow: auto; }
+  #data .card { width: min(760px, 100%); }
+  #data header { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  #data header h1 { flex: 1; }
+  #data .toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+  #data .toolbar button, #data header button { padding: 7px 12px; }
+  #data-path { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--dim); }
+  #data-path .crumb { padding: 2px 6px; border: 0; background: none; color: var(--accent); }
+  #data-box { border: 1px solid var(--line); border-radius: 8px; min-height: 240px; }
+  #data-box.dragging { outline: 3px dashed var(--accent); outline-offset: -6px; }
+  #data.busy #data-box { opacity: .6; pointer-events: none; }
+  #data-list { list-style: none; margin: 0; padding: 4px 0; }
+  #data-list li { display: flex; align-items: center; gap: 10px; padding: 4px 12px; border-bottom: 1px solid var(--panel); }
+  #data-list li.empty { color: var(--dim); padding: 24px 16px; border: 0; }
+  #data-list .name { flex: 1; min-width: 0; padding: 4px 6px; border: 0; background: none; overflow-wrap: anywhere; }
+  #data-list .name:hover { color: var(--accent); }
+  #data-list .meta { color: var(--dim); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #data-message { min-height: 1.5em; color: var(--dim); white-space: pre-wrap; }
+  #data-message.bad { color: var(--bad); }
+  @media (max-width: 520px) { #data-list .meta { display: none; } }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<canvas id="canvas" tabindex="-1" hidden></canvas>
+
+<div id="start">
+  <div class="card">
+    <h1>GT3 Revisited</h1>
+    <p><a href="https://github.com/matt-pulsipher/GT3-revisited" style="color:inherit">GT3 Revisited</a>, the rebuilt engine of Gran Turismo 3 A-Spec, in the browser. No game data is included: choose an image (.iso / .chd) made from your own disc.</p>
+    <div class="actions">
+      <button id="resume" class="primary" hidden></button>
+      <button id="pick">Choose a disc image…<small>Next time it starts without choosing</small></button>
+      <button id="nodisc">Start without a disc<small>The settings only</small></button>
+      <button id="data-open" onclick="gt3rOpenData()">Data<small>Saves, replays, screenshots, music, mods</small></button>
+    </div>
+    <p id="message" role="alert"></p>
+    <p class="note">The disc image is read only inside this browser and is sent nowhere. You can also drop the file on this page (then it is not remembered for next time).</p>
+    <input id="file" type="file" accept=".iso,.chd" hidden>
+  </div>
+</div>
+
+<div id="data" hidden>
+  <div class="card">
+    <header>
+      <h1>Data</h1>
+      <button id="data-close">Close</button>
+    </header>
+    <div id="data-path"></div>
+    <div class="toolbar">
+      <button id="data-up">Up</button>
+      <button id="data-upload">Upload…</button>
+      <button id="data-download">Download</button>
+      <button id="data-rename">Rename</button>
+      <button id="data-mkdir">New folder</button>
+      <button id="data-delete">Delete</button>
+    </div>
+    <div id="data-box"><ul id="data-list"></ul></div>
+    <p id="data-message" role="status"></p>
+    <input id="data-file" type="file" multiple hidden>
+  </div>
+</div>
+
+<script>
+  // The measuring overlay (debug.js) only with ?debug: otherwise nothing of it runs.
+  if (/[?&]debug\b/.test(location.search)) document.write('<script src="debug.js"><\/script>');
+</script>
+<script src="disc-bridge.js"></script>
+<script src="start.js"></script>
+<script src="data-browser.js"></script>
+</body>
+</html>
