@@ -36,7 +36,7 @@ private:
 
 class TrackAdapter : public RaceTrack {
 public:
-    explicit TrackAdapter(std::unique_ptr<track::Track> t) : t_(std::move(t)), ground_(*t_), lap_(*t_) {}
+    explicit TrackAdapter(std::shared_ptr<const track::Track> t) : t_(std::move(t)), ground_(*t_), lap_(*t_) {}
     const char* backend_name() const override { return "track::Track"; }
     const sim::TrackQuery& query() const override { return ground_; }
     float length() const override { return t_->length(); }
@@ -82,7 +82,7 @@ public:
 
 private:
     const LapSource* src_ = nullptr;
-    std::unique_ptr<track::Track> t_;
+    std::shared_ptr<const track::Track> t_; // (shared by the races on the course)
     GroundQuery ground_;
     track::LapTimer lap_;
 };
@@ -117,6 +117,10 @@ CarSetup car_setup_from_database(const data::CarDatabase& db, const std::string&
 std::unique_ptr<RaceTrack> make_track(const Vfs& vfs, ByteSpan course_file, const std::string& label) {
     (void)vfs;
     return std::make_unique<TrackAdapter>(track::Track::from_course_file(course_file, label));
+}
+
+std::unique_ptr<RaceTrack> make_track(std::shared_ptr<const track::Track> track) {
+    return std::make_unique<TrackAdapter>(std::move(track));
 }
 
 } // namespace gt3r::race
