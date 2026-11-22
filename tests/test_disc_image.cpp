@@ -220,7 +220,8 @@ TEST(inflate_untrusted_size) {
         const Bytes gz = gzip_member(*data);
         CHECK(inflate_gzip(gz, data->size()) == *data);
         CHECK(inflate_fails(gz, data->size() + 1) && inflate_fails(gz, 0xFFFFFFFFu) &&
-              inflate_fails(gz, std::numeric_limits<size_t>::max() / 2));
+              inflate_fails(gz, std::numeric_limits<size_t>::max() / 2) &&
+              inflate_fails(gz, std::numeric_limits<size_t>::max()));
         if (!data->empty())
             CHECK(inflate_fails(gz, data->size() - 1) && inflate_fails(ByteSpan(gz).first(gz.size() - 9), data->size()));
     }

@@ -3,6 +3,7 @@
 #include <zlib.h>
 
 #include <algorithm>
+#include <limits>
 
 namespace gt3r {
 
@@ -11,7 +12,9 @@ namespace gt3r {
 static Bytes inflate_with(ByteSpan src, size_t expected_size, int window_bits) {
     // One byte past the expected size: a stream that runs longer fills it, and an empty file (some VOL entries are gzip
     // members of empty files) still gets the non-null buffer zlib needs.
-    Bytes out(std::min(expected_size, src.size() * 4) + 1);
+    // (Short of wrapping round: a stated size of SIZE_MAX, 0xFFFFFFFF where size_t is 32 bits, would give 0.)
+    const size_t limit = expected_size == std::numeric_limits<size_t>::max() ? expected_size : expected_size + 1;
+    Bytes out(std::min(limit, src.size() * 4 + 1));
     z_stream zs{};
     if (inflateInit2(&zs, window_bits) != Z_OK) throw FormatError("inflateInit2 failed");
     zs.next_in = const_cast<Bytef*>(src.data());
@@ -24,7 +27,7 @@ static Bytes inflate_with(ByteSpan src, size_t expected_size, int window_bits) {
         rc = inflate(&zs, Z_FINISH); // Z_BUF_ERROR: out of input, or (buffer full) out of room
         produced = size_t(zs.next_out - out.data());
         if (rc != Z_BUF_ERROR || produced < out.size() || out.size() > expected_size) break;
-        out.resize(std::min(expected_size + 1, out.size() * 2));
+        out.resize(std::min(limit, out.size() * 2));
     }
     inflateEnd(&zs);
     if (rc != Z_STREAM_END || produced != expected_size) throw FormatError("inflate failed or size mismatch");
