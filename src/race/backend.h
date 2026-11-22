@@ -180,5 +180,7 @@ public:
 
 // The course's track runtime; throws FormatError when the course file has none.
 std::unique_ptr<RaceTrack> make_track(const Vfs& vfs, ByteSpan course_file, const std::string& label);
+// The runtime of a track built before (track::Track::from_course_file), shared by the races on the course (the race screen keeps it for its next start there).
+std::unique_ptr<RaceTrack> make_track(std::shared_ptr<const track::Track> track);
 
 } // namespace gt3r::race

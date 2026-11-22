@@ -82,6 +82,7 @@ void RaceScreen::start(App& app, const Replay* replay) {
             }
         }
         if (!course) throw FormatError("missing " + path);
+        const bool same_course = course_bytes_ && *course_bytes_ == *course; // (as the last start's)
         course_bytes_ = course;
         car_ = car_setup_from_database(db_, ca.label);
         if (replay && !replay->car_model.empty()) launch_model_ = replay->car_model;
@@ -96,7 +97,13 @@ void RaceScreen::start(App& app, const Replay* replay) {
         car_visual_.reset();
         drop_vehicle();
         track_.reset();
-        track_ = make_track(*app.vfs(), *course, ce.label);
+        // The course's track: the last start's when it was on this course, else built here.
+        std::shared_ptr<const track::Track> track;
+        if (!track && same_course && course_track_label_ == ce.label) track = course_track_;
+        if (!track) track = track::Track::from_course_file(*course, ce.label);
+        course_track_ = track, course_track_label_ = ce.label;
+        track_ = make_track(std::move(track));
+        part("track");
         // The road under a point, for view mode 1's procedural cameras (none off the road or on a wall).
         camera_.set_ground([this](float x, float z, float y) -> std::optional<float> {
             if (!track_) return std::nullopt;

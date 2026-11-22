@@ -294,6 +294,9 @@ private:
     void seed_vehicle_condition(const sim::EngineCondition& c, bool live);
     sim::EngineCondition live_condition() const;
     std::optional<Bytes> read_car(App& app, const std::string& model) const;
+    // The last start's course track, for the next start on the same course (restarts, retries).
+    std::shared_ptr<const track::Track> course_track_;
+    std::string course_track_label_;
     // [video] showroom_wheels: the model's menu/cars file and a fitted wheel's
     // menu/wheel/<label> (CarVisual's showroom_car, showroom_wheel); none when off. `stand_in`: the
     // menus' rim, read only for a race rim with nothing to draw, whatever the setting

@@ -188,7 +188,13 @@ constexpr u64 kElectricDriveVersion = 0xE1EC7D01;
 } // namespace
 
 u64 exact_data_fingerprint(const data::CarDatabase& db, std::span<const ex::StartEntry> entries, ByteSpan course_file) {
-    u64 h = hash_bytes(course_file);
+    // The course file's hash (a byte at a time: about 24 ms in a browser), kept for the last file (by its quick_hash): a
+    // race's restarts and replays on the same course do not work it out again.
+    static u64 key = 0;
+    static std::optional<u64> course;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (const u64 k = quick_hash(course_file); k != key || !course) course = hash_bytes(course_file), key = k;
+    u64 h = *course;
     auto mix = [&](data::TableId t, u64 id) {
         const ByteSpan* r = id ? db.record(t, id) : nullptr;
         const u64 v = r ? hash_bytes(*r) : 0;
