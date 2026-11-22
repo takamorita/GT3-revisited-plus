@@ -194,7 +194,7 @@ jobs:
         run: |
           mkdir -p /tmp/page && cd /tmp/page && unzip -q /tmp/web/gt3r-web.zip && rm -f serve-*
           cd "$GITHUB_WORKSPACE"
-          git rm -q --ignore-unmatch -- $(git ls-files | grep -v '^\.nojekyll$')
+          git ls-files | grep -v '^\.nojekyll$' | xargs -r git rm -q --
           cp /tmp/page/* .
           touch .nojekyll
           git add -A
