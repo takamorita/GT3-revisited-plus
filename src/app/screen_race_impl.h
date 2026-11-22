@@ -453,6 +453,8 @@ private:
 
     // Race audio (screen_race_audio.cpp)
     void music_cues(App& app);
+    // Writes music_cues' changes: when the race pauses, goes to the background or closes.
+    void save_music_changes(App& app);
     // Ours: the race song controls (the Next / Previous song chords, the driving layout's song
     // buttons; the pause screen's L1 / R1 in update_pause) and the song shown after a skip.
     // Held, each keeps skipping (race::SongSkipHold).
@@ -1219,6 +1221,8 @@ private:
     ReplayDirector director_;
     ReverbAmbience ambience_;
     RaceMusic music_;
+    // music_cues: the playlist / song playing changed in the config, the player's own playlist changed
+    bool config_unsaved_ = false, playlist_unsaved_ = false;
     int music_start_type_ = 2;          // the field event's start type (start jingle; music §2)
     double music_license_end_s_ = -1;   // the live licence run's end (race time), for its replay's finish cue
     bool music_license_failed_ = false; // the live licence run failed (its replay's fail jingle; music §3.1)

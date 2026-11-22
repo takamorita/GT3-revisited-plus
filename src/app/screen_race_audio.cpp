@@ -63,8 +63,9 @@ void RaceScreen::music_cues(App& app) {
              : prerace_ || !results ? RaceMusic::Menu::Short
                                     : RaceMusic::Menu::Result;
     music_.cues(app.audio(), *app.vfs(), c);
-    // The playlist carries over to the next race: saved whenever a song was taken. So does the
-    // song playing ([music] race_song, for next_race = same), except a demo's.
+    // The playlist carries over to the next race, and so does the song playing ([music] race_song,
+    // for next_race = same), except a demo's: kept in memory and written by save_music_changes
+    // (a write at every new song stopped the race for about 200 ms on slow storage).
     bool save = false;
     if (std::optional<std::string> pl = music_.take_playlist_change()) {
         app.config().set("options", "music_playlist", *pl);
@@ -74,8 +75,14 @@ void RaceScreen::music_cues(App& app) {
         app.config().set("music", "race_song", *song);
         save = true;
     }
-    if (save) app.save_config();
-    if (music_.take_custom_change()) app.music_library().save_playlist();
+    if (save) config_unsaved_ = true;
+    if (music_.take_custom_change()) playlist_unsaved_ = true;
+}
+
+void RaceScreen::save_music_changes(App& app) {
+    if (config_unsaved_) app.save_config();
+    if (playlist_unsaved_) app.music_library().save_playlist();
+    config_unsaved_ = playlist_unsaved_ = false;
 }
 
 void RaceScreen::song_controls(App& app, double dt) {
