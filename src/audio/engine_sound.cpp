@@ -7,10 +7,31 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <map>
+#include <vector>
 
 namespace gt3r {
 
 namespace {
+
+// A bank file read and parsed, from `banks` when it has it (a race's cars load the same wind bank and often the same
+// engines: it read and parsed one for every car), else read and kept there. nullptr when the file is missing; throws
+// when it is bad.
+std::shared_ptr<const sound::EngineBank> load_bank(const Vfs& vfs, const std::string& path, EngineBanks* banks) {
+    if (banks)
+        if (auto it = banks->find(path); it != banks->end()) return it->second;
+    std::optional<Bytes> bytes = vfs.read(path);
+    if (!bytes) return nullptr;
+    std::shared_ptr<const sound::EngineBank> b = std::make_shared<const sound::EngineBank>(sound::EngineBank::parse(*bytes));
+    if (banks) (*banks)[path] = b;
+    return b;
+}
+
+std::string engine_id(int sound_id) {
+    char id[16];
+    std::snprintf(id, sizeof(id), "%05d", sound_id);
+    return id;
+}
 
 constexpr double kTick = 1.0 / 60.0;
 constexpr int kMinRpm = 200;
@@ -58,16 +79,20 @@ std::string EngineSound::variant_dir(int variant) {
 
 EngineSound::~EngineSound() = default;
 
-bool EngineSound::load(Vfs& vfs, int sound_id, int variant, std::string* error, const std::string& dir) {
-    char id[16];
-    std::snprintf(id, sizeof(id), "%05d", sound_id);
+bool EngineSound::load(Vfs& vfs, int sound_id, int variant, std::string* error, EngineBanks* shared,
+                       const std::string& dir) {
+    const std::string id = engine_id(sound_id);
     std::shared_ptr<const sound::EngineBank> banks[2];
-    std::string paths[2] = {std::string("sound/engine/") + id, "sound/" + variant_dir(variant) + "/" + id};
+    std::string paths[2] = {"sound/engine/" + id, "sound/" + variant_dir(variant) + "/" + id};
     for (int i = 0; i < 2; ++i) {
-        try { // (an unreadable file is an error, as a bad one is)
-            auto bytes = dir.empty() ? vfs.read(paths[i]) : read_host_file(dir + "/" + paths[i].substr(6)); // (past "sound/")
-            if (!bytes) continue; // a car may lack one bank (e.g. engine-only ids)
-            banks[i] = std::make_shared<const sound::EngineBank>(sound::EngineBank::parse(*bytes));
+        try { // (an unreadable file is an error, as a bad one is; a car may lack one bank, e.g. engine-only ids)
+            if (dir.empty()) {
+                banks[i] = load_bank(vfs, paths[i], shared);
+            } else {
+                auto bytes = read_host_file(dir + "/" + paths[i].substr(6)); // (past "sound/")
+                if (!bytes) continue;
+                banks[i] = std::make_shared<const sound::EngineBank>(sound::EngineBank::parse(*bytes));
+            }
         } catch (const std::exception& e) {
             if (error) *error = paths[i] + ": " + e.what();
             return false;
@@ -245,14 +270,14 @@ void EngineSound::run_player(VoiceMixer& mixer, Player& p, int rpm, u16 pitch_sc
     p.slot[1] = next[1];
 }
 
-bool EngineUnit::load(Vfs& vfs, const std::string& path, std::string* error) {
-    auto bytes = vfs.read(path);
-    if (!bytes) {
-        if (error) *error = path + " not found";
-        return false;
-    }
+bool EngineUnit::load(Vfs& vfs, const std::string& path, std::string* error, EngineBanks* banks) {
     try {
-        set_bank(std::make_shared<const sound::EngineBank>(sound::EngineBank::parse(*bytes)));
+        std::shared_ptr<const sound::EngineBank> bank = load_bank(vfs, path, banks);
+        if (!bank) {
+            if (error) *error = path + " not found";
+            return false;
+        }
+        set_bank(std::move(bank));
     } catch (const std::exception& e) {
         if (error) *error = path + ": " + e.what();
         return false;
