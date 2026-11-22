@@ -129,6 +129,7 @@ struct DebugPreset {
     bool watch = false, save = false, ghost = true, music = true;
     double warp = 0, quit = 0, rwarp = 0;
     bool demo_drive = false; // tests: the player's run driven by the disc's demo inputs (judged as a real run)
+    bool rlive = false;      // tests: a replay draws the live run's mirror and HUD (a played race's drawing, repeatably)
     double leave = 0; // tests: back to the menus this many seconds after the finish (posts the result)
     int place = 0;    // tests: a finished race is reported with this finishing position (the prize pages after a real race)
     int exit_laps = 0; // screenshots: a run ends as the pause menu's Exit once it has this many laps

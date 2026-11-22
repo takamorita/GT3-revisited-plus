@@ -35,6 +35,7 @@ DebugPreset read_preset() {
         else if (k == "leave") p.leave = std::atof(v.c_str());
         else if (k == "place") p.place = std::atoi(v.c_str());
         else if (k == "demo_drive") p.demo_drive = v != "0";
+        else if (k == "rlive") p.rlive = v != "0";
         else if (k == "line") p.line_pace = float(std::atof(v.c_str()));
         else if (k == "paint") p.paint = std::atoi(v.c_str());
         else if (k == "hud") p.hud = v != "0";

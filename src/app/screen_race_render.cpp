@@ -886,7 +886,7 @@ void RaceScreen::render_drive(App& app, Ui& ui) {
     remove_wet_road(wet_items); // (the wet road's frame items belong to this view only)
     hitch::draw_ms = double(SDL_GetTicksNS() - h_c1) / 1e6;
     hitch::meshes = view_->stats().meshes_drawn;
-    if (!replaying_ && !demo_replay() && !race_preview_ && camera_.shows_mirror() && (!split || horizontal)) // (no mirror in a replay's or demonstration's driver's view)
+    if ((!replaying_ || preset_.rlive) && !demo_replay() && !race_preview_ && camera_.shows_mirror() && (!split || horizontal)) // (no mirror in a replay's or demonstration's driver's view, but a live replay's)
         draw_mirror(app, ui, rect, o, false, split);
     if (split) {
         if (!view2_) view2_ = std::make_unique<render::View3D>(*app.gpu());
@@ -930,7 +930,7 @@ void RaceScreen::render_drive(App& app, Ui& ui) {
     }
     if (replaying_ && split) {
         // 2P replays: both halves, no HUD and no mark (the captures).
-    } else if (((replaying_ && preset_.hud) || attract_ || demo_replay()) && !split) {
+    } else if (((replaying_ && preset_.hud && !preset_.rlive) || attract_ || demo_replay()) && !split) {
         // Replays and the attract demo (presentation §G): the mark on its timer, in replays only
         // while no ITEM is on, in the attract demo always; the REPLAY OPTIONS items and the title.
         if (attract_ || !replay_settings_.items)
