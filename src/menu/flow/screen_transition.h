@@ -15,6 +15,7 @@
 #include <SDL3/SDL_render.h>
 
 #include <array>
+#include <memory>
 
 namespace gt3r::menu::flow {
 
@@ -24,7 +25,10 @@ enum class TransitionType : u8 { Fadeout = 0, DelayFadeout = 1, Lineout = 2, Com
 class ScreenTransition {
 public:
     void start(TransitionType type);
-    void stop() { active_ = false; }
+    void stop() {
+        active_ = false;
+        base_.reset();
+    }
     bool active() const { return active_; }
     TransitionType type() const { return type_; }
     int frames() const { return frame_; }
@@ -34,6 +38,12 @@ public:
     // picture it started on: grey 0.1 (12.8 / 255 drawn) at alpha 0 for the first 10
     // frames, then 1 - 0.5^(frames - 10). The race exit draws it this way (presentation §C1).
     static SDL_FColor delay_fadeout_cover(int frames);
+    // The Fadeout's wash after `frames` frames, as one fill over the picture it started on:
+    // grey 12 / 255 at alpha 1 - (1 - 0x0C / 0x80)^frames. Drawn a frame at a time onto an 8-bit
+    // picture, the wash stopped short (rounding to the nearest, a step under half a level is
+    // lost): bright parts stayed at 17 and black at 7, a faint copy of the menu. The PS2 rounds
+    // down, so every pixel reaches 12.
+    static SDL_FColor fadeout_cover(int frames);
 
     // Draws one frame of the effect into `dst` (the 640x448 menu frame, y down).
     void draw_frame(SDL_Renderer* r, const SDL_FRect& dst);
@@ -48,6 +58,9 @@ private:
     int lines_ = 0;      // Lineout: current sweep width
     std::array<float, 256> rows_{}; // Combout: per row-pair sweep position
     u32 rng_ = 0;
+    // Fadeout: the picture as it was at the first frame (shared by copies: the race takes the
+    // menu's transition over).
+    std::shared_ptr<SDL_Texture> base_;
 };
 
 // What stays on screen while a race loads (menus §6): the menu's last frame (a 640 x 448

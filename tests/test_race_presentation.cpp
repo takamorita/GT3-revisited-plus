@@ -1165,6 +1165,22 @@ TEST(race_exit_wash) {
     CHECK(near(ScreenTransition::delay_fadeout_cover(18).a, 1.0f - 1.0f / 256.0f));
 }
 
+TEST(menu_fadeout_cover) {
+    // The Fadeout: grey 12 at alpha 0x0C / 0x80 a frame, summed over the first picture.
+    using menu::flow::ScreenTransition;
+    CHECK(ScreenTransition::fadeout_cover(0).a == 0);
+    SDL_FColor w = ScreenTransition::fadeout_cover(1);
+    CHECK(near(w.a, 12.0f / 128.0f) && near(w.r, 12.0f / 255.0f) && w.r == w.g && w.g == w.b);
+    // Frame 40 (a menu control loads): 2 % of the picture left; frame 48 (settle_frames): 1 %.
+    CHECK(near(ScreenTransition::fadeout_cover(40).a, 0.980f, 0.002f));
+    CHECK(near(ScreenTransition::fadeout_cover(48).a, 0.991f, 0.002f));
+    // Every pixel ends at the same level: white and black both within half a level of 12.
+    for (float x : {0.0f, 1.0f}) {
+        const float a = ScreenTransition::fadeout_cover(120).a;
+        CHECK(std::fabs((x * (1 - a) + w.r * a) * 255.0f - 12.0f) < 0.5f);
+    }
+}
+
 TEST(race_time_trial_finish) {
     // presentation §B7: the arcade time trial is one timed lap; the car finishes on the tick it
     // completes it (the event's lap count is never read). Free runs (no laps) never finish.
