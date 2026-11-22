@@ -134,6 +134,13 @@ bool App::init(int argc, char** argv) {
 #if defined(SDL_PLATFORM_ANDROID) || defined(SDL_PLATFORM_IOS)
     win_flags |= SDL_WINDOW_FULLSCREEN; // immersive: hide system bars
 #endif
+#ifdef __EMSCRIPTEN__
+    // In a browser the renderer is always OpenGL ES (WebGL 2), so the window is made for it at once. Made without
+    // SDL_WINDOW_OPENGL, SDL makes it again for its GLES2 renderer, and where the display is not at 100% (a device
+    // pixel ratio other than 1) that second window keeps 1280 x 720 and no longer follows the browser window:
+    // destroying the first one sets the canvas's CSS size to 1 x 1, which the second takes for no CSS sizing.
+    win_flags |= SDL_WINDOW_OPENGL;
+#endif
 #if !defined(SDL_PLATFORM_ANDROID) && !defined(SDL_PLATFORM_IOS)
     // [video] fullscreen = on | off (desktop; F11 and the Settings screen change it)
     if (to_lower(config_.get("video", "fullscreen").value_or("off")) == "on") win_flags |= SDL_WINDOW_FULLSCREEN;
