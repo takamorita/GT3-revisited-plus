@@ -127,6 +127,7 @@ std::optional<std::pair<int, int>> GtrcScript::other_variant(int k, float s) con
 
 void ReplayDirector::setup() {
     k_ = 0, offset_ = 0;
+    seam_known_ = false;
     aim_restart_ = true, yaw_seeded_ = false;
     aim_.forget_last_aim();
     shot_time_ = 0;
@@ -154,6 +155,7 @@ void ReplayDirector::reset() {
 void ReplayDirector::car_changed(double manual_seconds, bool search_first) {
     reset_flag_ = true, target_set_ = true;
     aim_.forget_last_aim(); // (another car: target state +0x92 cleared)
+    seam_known_ = false;
     if (manual_seconds > 0) manual_ = manual_seconds;
     attract_change_ = attract_change_ || search_first;
 }
@@ -327,7 +329,7 @@ ReplayDirector::Shot ReplayDirector::evaluate(const GtrcRecord& r, float D, cons
     want = std::max(want, 0.2f);
     // The camera operator (presentation §H6a): the aim of a record looking at the car follows it
     // late and unsteadily, the zoom moves on a spring (mode 1's wide shot only starts at 1.0).
-    // Stepped at 60 Hz, blended between the last two frames.
+    // Stepped at 60 Hz on the car where it was at each step, blended between the last two.
     CourseCameraAim::In in;
     in.eye = shot.eye, in.aim = shot.target;
     in.zoom = want;
@@ -340,25 +342,29 @@ ReplayDirector::Shot ReplayDirector::evaluate(const GtrcRecord& r, float D, cons
         aim_restart_ = false;
         for (u32& seed : in.seeds) seed = hardware_random(); // (each filter's noise: a clock value)
         aim_.restart();
-        aim_.step(in);
-        aim_acc_ = 0;
-    } else {
-        aim_acc_ += dt;
-        for (int n = 0; aim_acc_ >= 1.0 / 60.0 && n < 12; ++n) {
-            aim_acc_ -= 1.0 / 60.0;
-            aim_.step(in);
-        }
-        if (aim_acc_ > 1.0 / 60.0) aim_acc_ = 0;
     }
-    const CourseCameraAim::Out o = aim_.blend(float(aim_acc_ * 60.0));
+    const CourseCameraAim::Out o = aim_.advance(in, dt);
     shot.target = shot.eye + aim_direction(o.yaw, o.pitch) * render::length(in.aim - shot.eye);
     shot.fovy = zoom_fovy(o.zoom);
     shot.valid = true;
     return shot;
 }
 
+int ReplayDirector::seam_lap(float s, int lap) {
+    const float half = s_ ? s_->lap_length * 0.5f : 0.0f;
+    if (seam_known_ && half > 0) {
+        const bool near_end = s > half, was_near_end = seam_s_ > half;
+        if (lap == seam_lap_ + 1 && near_end && was_near_end) lap = seam_lap_;            // counted, not yet drawn across
+        else if (lap == seam_lap_ && was_near_end && !near_end) lap = seam_lap_ + 1;       // drawn across, not yet counted
+        else if (lap == seam_lap_ - 1 && !near_end && !was_near_end) lap = seam_lap_;      // (still not counted)
+    }
+    seam_lap_ = lap, seam_s_ = s, seam_known_ = true;
+    return lap;
+}
+
 ReplayDirector::Shot ReplayDirector::update(float s, int lap, const render::Vec3& car, double dt, float aspect,
                                             const Pair* pair) {
+    lap = seam_lap(s, lap); // (issue 402: a frame's flicker as the followed car crossed the line)
     Shot shot = update_shot(s, lap, car, dt, aspect, pair);
     aim_.remember(car); // the target state's aim point, after the cameras
     return shot;
