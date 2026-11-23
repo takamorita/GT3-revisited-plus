@@ -1,6 +1,6 @@
 # GT3 Revisited Plus
 
-A fork of [GT3 Revisited](https://github.com/matt-pulsipher/GT3-revisited) v0.7.1 that carries improvements meant
+A fork of [GT3 Revisited](https://github.com/matt-pulsipher/GT3-revisited) v0.7.2 that carries improvements meant
 for GT3 Revisited itself, each on a branch of its own so that it can be offered as a pull request, and a build for
 browsers:
 
